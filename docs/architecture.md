@@ -57,7 +57,7 @@ type Device interface {
 type Router interface {
     Add(device string, prefixes []netip.Prefix) error
     Remove(device string, prefixes []netip.Prefix) error
-    // Connected returns the connected subnets of the laptop,
+    // Connected returns the connected subnets of the client,
     // without the loopback and without the tj device.
     Connected() ([]netip.Prefix, error)
 }
@@ -140,7 +140,7 @@ The lock is the unit name `tj-session.service` plus the state file. macOS uses t
 
 ### Device and routes
 
-The device is `tj0` with MTU 1500. Its addresses are `169.254.117.1/32`, `fd00:117::1/128`, and `fe80::1/64`. The global-scope ULA `fd00:117::1/128` is required as an IPv6 source. RFC 6724 rejects a link-local source for a global destination, so a laptop without global IPv6 has no source at all without it, measured 2026-09-11. The session adds one `dev tj0` route per session network, IPv4 and IPv6. The session also adds a host route for each DNS server that is outside the session networks, so the queries are captured.
+The device is `tj0` with MTU 1500. Its addresses are `169.254.117.1/32`, `fd00:117::1/128`, and `fe80::1/64`. The global-scope ULA `fd00:117::1/128` is required as an IPv6 source. RFC 6724 rejects a link-local source for a global destination, so a client without global IPv6 has no source at all without it, measured 2026-09-11. The session adds one `dev tj0` route per session network, IPv4 and IPv6. The session also adds a host route for each DNS server that is outside the session networks, so the queries are captured.
 
 ### Netstack
 
@@ -174,7 +174,7 @@ networks = manifest.networks
 minus manifest.exclude
 minus 100.64.0.0/10 and fd7a:115c:a1e0::/48
 minus the remote's tailnet addresses
-minus the laptop's connected subnets
+minus the client's connected subnets
 minus config.exclude and every --exclude
 minus 0.0.0.0/8, 127.0.0.0/8, 169.254.0.0/16, 224.0.0.0/3, ::1/128, fe80::/10, ff00::/8
 ```
@@ -251,7 +251,7 @@ The SSH user defaults to the local username. The precedence is the flag, then `r
 * Errors are one line on stderr with exit code 1. A usage error exits 2. `connect` exits 3 when a session is active.
 * `log/slog` with a text handler on stderr. `-v` enables debug. The session unit logs to the journal through stderr.
 * `_remote` and `_session` are hidden commands.
-* `tj doctor <remote>` reports: peer online, SSH ok, banner, manifest path or absent, exec dir, helper architecture, discovery ok, session networks non-empty, DNS mode availability, resolved available, sudo rule present, root copy version. It runs the manifest checks from the remote through the helper over a temporary mux, and from the laptop with a direct dial.
+* `tj doctor <remote>` reports: peer online, SSH ok, banner, manifest path or absent, exec dir, helper architecture, discovery ok, session networks non-empty, DNS mode availability, resolved available, sudo rule present, root copy version. It runs the manifest checks from the remote through the helper over a temporary mux, and from the client with a direct dial.
 * Timeouts: SSH dial 15 s, discovery exec 20 s, helper handshake 10 s, connect 90 s in total.
 
 ## Testing
@@ -259,11 +259,11 @@ The SSH user defaults to the local username. The precedence is the flag, then `r
 * Unit tests are next to the code. The `fake` platform serves `session` and `dns`.
 * The loopback test in `internal/dataplane` runs the netstack, the mux client, and the helper in one process over `net.Pipe()`. It sends TCP to a local listener and UDP to a local echo server. It needs no device and no root.
 * `test/e2e` is a rootless podman rig: `ubuntu:26.04` with systemd and systemd-resolved, run with `--systemd=always --device /dev/net/tun --cap-add NET_ADMIN --cap-add NET_RAW --cap-add SYS_ADMIN`, the tailscaled socket mounted at `/var/run/tailscale/tailscaled.sock`, and the built `tj` mounted. `task e2e` runs it. The rig connects to the shared gateway `shared-gateway` as `root`. It checks TCP over IPv4 and IPv6 to the gateway's VPC addresses on port 22, UDP DNS to the VPC resolver, each DNS mode, `disconnect`, the one-session lock, and the empty remote. Verified on 2026-09-11: systemd, resolved, TUN, routes, and the local API work in this rig. Without `CAP_SYS_ADMIN`, resolved fails to start.
-* `tj connect` never runs on the developer laptop during development. The laptop has an sshuttle session, and the one-session rule applies. The rig is the place for every connect test.
+* `tj connect` never runs on the client machine during development. The client has an sshuttle session, and the one-session rule applies. The rig is the place for every connect test.
 
 ## Performance, spike 1, 2026-09-11
 
-Download of 256 MiB, median of 3 runs, from the shared gateway over a WiFi laptop. The raw SSH row alone spans 49 to 64 Mbit/s across runs, so the settings were compared as paired cycles, not single medians.
+Download of 256 MiB, median of 3 runs, from the shared gateway over a WiFi client. The raw SSH row alone spans 49 to 64 Mbit/s across runs, so the settings were compared as paired cycles, not single medians.
 
 | Path | Mbit/s |
 | -- | -- |

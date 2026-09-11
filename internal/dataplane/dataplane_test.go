@@ -85,7 +85,7 @@ func newLoopback(t *testing.T) *loopback {
 	return lb
 }
 
-// newAppStack builds the stack that stands in for the laptop's applications:
+// newAppStack builds the stack that stands in for the client's applications:
 // two assigned addresses and default routes, so a Dial reaches any
 // destination through its link endpoint.
 func newAppStack(t *testing.T) (*stack.Stack, *channel.Endpoint) {

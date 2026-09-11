@@ -23,7 +23,7 @@ type Device interface {
 type Router interface {
 	Add(device string, prefixes []netip.Prefix) error
 	Remove(device string, prefixes []netip.Prefix) error
-	// Connected returns the connected subnets of the laptop,
+	// Connected returns the connected subnets of the client,
 	// without the loopback and without the tj device.
 	Connected() ([]netip.Prefix, error)
 }

@@ -159,7 +159,7 @@ task lint
 helper into `internal/helper/embed/bin`, then builds `bin/tj` for the host.
 
 `tj connect` never runs on a developer machine: the one-session rule
-applies there too, and a laptop typically already has its own session to
+applies there too, and a client typically already has its own session to
 somewhere else. `test/e2e` is a rootless podman rig for exactly this: it
 builds `tj`, starts an `ubuntu:26.04` container with systemd, and connects
 from inside it against a real gateway. Set the real gateway in

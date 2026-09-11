@@ -42,7 +42,7 @@ func routeArgs(verb, device string, p netip.Prefix) []string {
 	return []string{"-q", "-n", verb, family, p.String(), "-interface", device}
 }
 
-// Connected returns the connected subnets of the laptop from the addresses
+// Connected returns the connected subnets of the client from the addresses
 // that ifconfig reports, without the loopback interfaces and without a
 // point-to-point interface such as the tj device itself: a utun address has
 // no broadcast segment, so a point-to-point alias is never a shared subnet.

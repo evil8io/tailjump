@@ -19,7 +19,7 @@ import (
 func newDoctorCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "doctor <remote>",
-		Short: "Run the manifest checks from the remote and from the laptop",
+		Short: "Run the manifest checks from the remote and from the client",
 		Args:  cobra.ExactArgs(1),
 		RunE:  runDoctor,
 	}
@@ -154,7 +154,7 @@ func doctorSessionNetworks(m *manifest.Manifest, res *discovery.Result, cfg *con
 		DiscoveryLinkRoutes: linkRoutes,
 		DiscoveryCloud:      cloudNets,
 		RemoteAddrs:         rr.Peer.TailscaleIPs,
-		LaptopConnected:     laptopConnected(),
+		ClientConnected:     clientConnected(),
 		LocalExclude:        localExclude,
 	})
 }

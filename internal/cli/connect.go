@@ -162,7 +162,7 @@ func connectNetworks(m *manifest.Manifest, res *discovery.Result, cfg *config.Co
 		DiscoveryLinkRoutes: linkRoutes,
 		DiscoveryCloud:      cloudNets,
 		RemoteAddrs:         rr.Peer.TailscaleIPs,
-		LaptopConnected:     laptopConnected(),
+		ClientConnected:     clientConnected(),
 		LocalExclude:        localExclude,
 	})
 }

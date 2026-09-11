@@ -7,7 +7,7 @@ import (
 )
 
 // reserved lists the ranges a session never routes, on top of the manifest
-// excludes and the laptop's own subnets.
+// excludes and the client's own subnets.
 var reserved = []netip.Prefix{
 	netip.MustParsePrefix("100.64.0.0/10"),       // tailnet
 	netip.MustParsePrefix("fd7a:115c:a1e0::/48"), // tailnet
@@ -28,13 +28,13 @@ type Inputs struct {
 	DiscoveryLinkRoutes []netip.Prefix
 	DiscoveryCloud      []netip.Prefix
 	RemoteAddrs         []netip.Addr
-	LaptopConnected     []netip.Prefix
+	ClientConnected     []netip.Prefix
 	LocalExclude        []netip.Prefix
 }
 
 // ComputeNetworks returns the minimal sorted session prefix list: the manifest
 // networks plus the discovery result, minus the excludes, the reserved ranges,
-// the remote's addresses, and the laptop's connected subnets.
+// the remote's addresses, and the client's connected subnets.
 func ComputeNetworks(in Inputs) ([]netip.Prefix, error) {
 	var incl netipx.IPSetBuilder
 	for _, p := range in.ManifestNetworks {
@@ -55,7 +55,7 @@ func ComputeNetworks(in Inputs) ([]netip.Prefix, error) {
 	for _, p := range in.ManifestExclude {
 		excl.AddPrefix(p)
 	}
-	for _, p := range in.LaptopConnected {
+	for _, p := range in.ClientConnected {
 		excl.AddPrefix(p)
 	}
 	for _, p := range in.LocalExclude {

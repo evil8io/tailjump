@@ -29,13 +29,13 @@ func TestParseDiscoveryDefaults(t *testing.T) {
 	}
 }
 
-func TestComputeNetworksExcludesTailnetRemoteAndLaptop(t *testing.T) {
+func TestComputeNetworksExcludesTailnetRemoteAndClient(t *testing.T) {
 	mustP := netip.MustParsePrefix
 	in := Inputs{
 		ManifestNetworks: []netip.Prefix{mustP("10.50.0.0/16")},
 		DiscoveryCloud:   []netip.Prefix{mustP("100.64.0.0/16")}, // inside tailnet, must drop
 		RemoteAddrs:      []netip.Addr{netip.MustParseAddr("10.50.6.26")},
-		LaptopConnected:  []netip.Prefix{mustP("192.168.240.0/24")},
+		ClientConnected:  []netip.Prefix{mustP("192.168.240.0/24")},
 	}
 	got, err := ComputeNetworks(in)
 	if err != nil {

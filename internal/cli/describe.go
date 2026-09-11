@@ -35,7 +35,7 @@ type describeExclusions struct {
 	ManifestExclude []string `json:"manifest_exclude"`
 	Reserved        []string `json:"reserved"`
 	RemoteAddrs     []string `json:"remote_addrs"`
-	LaptopConnected []string `json:"laptop_connected"`
+	ClientConnected []string `json:"client_connected"`
 	LocalExclude    []string `json:"local_exclude"`
 }
 
@@ -149,7 +149,7 @@ func buildDescribeOutput(client *sshc.Client, rr *resolvedRemote, cfg *config.Co
 		}
 	}
 
-	connected := laptopConnected()
+	connected := clientConnected()
 
 	networks, err := manifest.ComputeNetworks(manifest.Inputs{
 		ManifestNetworks:    manifestNetworks,
@@ -157,7 +157,7 @@ func buildDescribeOutput(client *sshc.Client, rr *resolvedRemote, cfg *config.Co
 		DiscoveryLinkRoutes: linkRoutes,
 		DiscoveryCloud:      cloudNets,
 		RemoteAddrs:         rr.Peer.TailscaleIPs,
-		LaptopConnected:     connected,
+		ClientConnected:     connected,
 		LocalExclude:        localExclude,
 	})
 	if err != nil {
@@ -180,7 +180,7 @@ func buildDescribeOutput(client *sshc.Client, rr *resolvedRemote, cfg *config.Co
 			ManifestExclude: m.Exclude,
 			Reserved:        reservedForDisplay,
 			RemoteAddrs:     addrStrings(rr.Peer.TailscaleIPs),
-			LaptopConnected: prefixStrings(connected),
+			ClientConnected: prefixStrings(connected),
 			LocalExclude:    cfg.Exclude,
 		},
 		Networks: prefixStrings(networks),
@@ -240,7 +240,7 @@ func printDescribe(cmd *cobra.Command, out *describeOutput) error {
 	_, _ = fmt.Fprintf(w, "  manifest exclude:\t%s\n", joinOrNone(out.Exclusions.ManifestExclude))
 	_, _ = fmt.Fprintf(w, "  reserved:\t%s\n", joinOrNone(out.Exclusions.Reserved))
 	_, _ = fmt.Fprintf(w, "  remote address:\t%s\n", joinOrNone(out.Exclusions.RemoteAddrs))
-	_, _ = fmt.Fprintf(w, "  laptop connected:\t%s\n", joinOrNone(out.Exclusions.LaptopConnected))
+	_, _ = fmt.Fprintf(w, "  client connected:\t%s\n", joinOrNone(out.Exclusions.ClientConnected))
 	_, _ = fmt.Fprintf(w, "  local exclude:\t%s\n", joinOrNone(out.Exclusions.LocalExclude))
 
 	_, _ = fmt.Fprintln(w, "Session networks:")
