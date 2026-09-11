@@ -54,9 +54,6 @@ A source build embeds no remote helper, so `tj connect` needs a release
 build or a local `task helpers` run. The read-only commands `tj list`,
 `describe`, and `doctor` work either way.
 
-While the repository is private, the prebuilt and mise options need a
-`GITHUB_TOKEN` with read access in the environment.
-
 ## Setup
 
 Run this once per machine:

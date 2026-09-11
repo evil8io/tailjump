@@ -6,7 +6,7 @@ This document is a copy of Linear story K8S-194. The story is the spec and the p
 
 `tj` is a CLI that gives an engineer a session into a remote network over Tailscale SSH, the way sshuttle does. The remote runs no installed software and advertises no subnet routes. The engineer starts and ends every session. The tool works in any tailnet and has no Evil8 term in it. It replaces sshuttle plus the `ts-gateway.sh` script and the `connect` tasks in iac-modules.
 
-Repository: https://github.com/evil8io/tailjump (private). Binary name: `tj`. Language: Go.
+Repository: https://github.com/evil8io/tailjump. Binary name: `tj`. Language: Go.
 
 ## 2. Non-goals
 
@@ -181,7 +181,7 @@ Each chunk is one story and one PR. The order is the dependency order.
 
 | # | Chunk | Content | Done when |
 | -- | -- | -- | -- |
-| 0 | Repository scaffold | Go module, cobra skeleton, platform interfaces with fakes and the macOS stub, CI build matrix, lint, release-please, goreleaser, mise install through the `github` backend with a token for the private repo | CI is green on all three targets, and `tj version` runs |
+| 0 | Repository scaffold | Go module, cobra skeleton, platform interfaces with fakes and the macOS stub, CI build matrix, lint, release-please, goreleaser, mise install through the `github` backend | CI is green on all three targets, and `tj version` runs |
 | 1 | Spikes | Four throwaway branches with a written result each in `docs/spikes/`: TUN plus netstack on Linux with a throughput measurement against sshuttle on the same remote; the Go SSH client against Tailscale SSH including check mode; a remote with a `noexec` runtime directory; the helper size | Each result is a document with the numbers |
 | 2 | Tailnet and SSH | `list`, `describe`, `doctor`; the local API client; the SSH client; the manifest reader; the discovery script; the session network computation | `tj describe` prints the merged config for the shared gateway and for a second gateway |
 | 3 | Helper and mux | `tj _remote`; the mux protocol; TCP streams; UDP frames with idle timeout; upload, start, and cleanup; the in-process loopback test | The loopback test passes for TCP and UDP, and no file remains on the remote |
