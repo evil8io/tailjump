@@ -1,0 +1,40 @@
+---
+version: 2
+project_name: tj
+
+before:
+  hooks:
+    - task helpers
+
+builds:
+  - id: tj
+    main: ./cmd/tj
+    binary: tj
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w -X github.com/evil8io/tailjump/internal/version.Version={{.Version}}
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    ignore:
+      - goos: darwin
+        goarch: amd64
+
+archives:
+  - formats:
+      - tar.gz
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+
+checksum:
+  name_template: "checksums.txt"
+
+release:
+  github:
+    owner: evil8io
+    name: tailjump

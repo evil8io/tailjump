@@ -1,0 +1,7 @@
+/bin/
+/dist/
+internal/helper/embed/bin/tj-helper-*
+*.out
+
+# local e2e target, never committed
+test/e2e/target.env

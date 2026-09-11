@@ -1,0 +1,46 @@
+---
+version: "3"
+
+vars:
+  VERSION:
+    sh: git describe --tags --always --dirty
+
+tasks:
+  helpers:
+    desc: Build the remote helper for linux/amd64 and linux/arm64.
+    env:
+      CGO_ENABLED: "0"
+    cmds:
+      - mkdir -p internal/helper/embed/bin
+      - GOOS=linux GOARCH=amd64 go build -trimpath -ldflags "-s -w -X github.com/evil8io/tailjump/internal/version.Version={{.VERSION}}" -o internal/helper/embed/bin/tj-helper-linux-amd64 ./cmd/tjhelper
+      - GOOS=linux GOARCH=arm64 go build -trimpath -ldflags "-s -w -X github.com/evil8io/tailjump/internal/version.Version={{.VERSION}}" -o internal/helper/embed/bin/tj-helper-linux-arm64 ./cmd/tjhelper
+    generates:
+      - internal/helper/embed/bin/tj-helper-linux-amd64
+      - internal/helper/embed/bin/tj-helper-linux-arm64
+  build:
+    desc: Build tj into bin/tj.
+    deps:
+      - helpers
+    env:
+      CGO_ENABLED: "0"
+    cmds:
+      - mkdir -p bin
+      - go build -trimpath -ldflags "-s -w -X github.com/evil8io/tailjump/internal/version.Version={{.VERSION}}" -o bin/tj ./cmd/tj
+  test:
+    desc: Run the unit tests.
+    cmds:
+      - go test -race ./...
+  lint:
+    desc: Run golangci-lint.
+    cmds:
+      - golangci-lint run
+  fmt:
+    desc: Format the source and tidy the module.
+    cmds:
+      - gofmt -l -w .
+      - go mod tidy
+  e2e:
+    desc: Run the container rig against the Evil8 shared gateway.
+    cmds:
+      - echo "the e2e rig arrives in chunk 4"
+      - exit 1

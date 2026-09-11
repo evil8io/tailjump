@@ -1,0 +1,22 @@
+# Rig image for the tj e2e test: Ubuntu with systemd and systemd-resolved, so
+# the session runs as a transient unit and applies DNS the way it does on a
+# laptop. See docs/architecture.md, "Testing".
+FROM ubuntu:26.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update \
+	&& apt-get install -y --no-install-recommends \
+		systemd \
+		systemd-resolved \
+		iproute2 \
+		dnsutils \
+		netcat-openbsd \
+		iputils-ping \
+		ca-certificates \
+	&& apt-get clean \
+	&& rm -rf /var/lib/apt/lists/*
+
+# systemd is the init, so the transient session unit and resolved both run.
+# Ubuntu 26.04 ships no /sbin/init symlink, so name the systemd binary.
+STOPSIGNAL SIGRTMIN+3
+CMD ["/lib/systemd/systemd"]

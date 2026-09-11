@@ -1,0 +1,76 @@
+package session
+
+import (
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"log/slog"
+	"os"
+	"strings"
+	"text/tabwriter"
+	"time"
+
+	"github.com/evil8io/tailjump/internal/platform"
+)
+
+// Status prints the active session. It cross-checks the unit, so a stale
+// state file from a crash does not report a session that is gone. It reads
+// the state file without root.
+func Status(w io.Writer, asJSON bool) error {
+	plat := platform.New()
+	statePath := StatePath(plat.Paths.RuntimeDir())
+
+	st, err := ReadState(statePath)
+	if errors.Is(err, os.ErrNotExist) {
+		return printNoSession(w, asJSON)
+	}
+	if err != nil {
+		return err
+	}
+	switch active, aerr := plat.Runner.Active(); {
+	case aerr != nil:
+		slog.Warn("check session active", "error", aerr)
+	case !active:
+		return printNoSession(w, asJSON)
+	}
+
+	if asJSON {
+		return json.NewEncoder(w).Encode(st)
+	}
+	return printState(w, st)
+}
+
+func printNoSession(w io.Writer, asJSON bool) error {
+	if asJSON {
+		return json.NewEncoder(w).Encode(map[string]string{"status": "none"})
+	}
+	_, err := fmt.Fprintln(w, "no active session")
+	return err
+}
+
+func printState(w io.Writer, st *State) error {
+	tw := tabwriter.NewWriter(w, 0, 4, 2, ' ', 0)
+	_, _ = fmt.Fprintf(tw, "Remote:\t%s (%s)\n", st.Remote, st.Addr)
+	_, _ = fmt.Fprintf(tw, "User:\t%s\n", st.User)
+	_, _ = fmt.Fprintf(tw, "Status:\t%s\n", st.Status)
+	_, _ = fmt.Fprintf(tw, "DNS mode:\t%s\n", st.DNS.Mode)
+	_, _ = fmt.Fprintf(tw, "Uptime:\t%s\n", uptime(st.StartedAt))
+	_, _ = fmt.Fprintf(tw, "Networks:\t%s\n", joinOrNone(st.Networks))
+	return tw.Flush()
+}
+
+func uptime(startedAt string) string {
+	t, err := time.Parse(time.RFC3339, startedAt)
+	if err != nil {
+		return "unknown"
+	}
+	return time.Since(t).Round(time.Second).String()
+}
+
+func joinOrNone(items []string) string {
+	if len(items) == 0 {
+		return "(none)"
+	}
+	return strings.Join(items, ", ")
+}
