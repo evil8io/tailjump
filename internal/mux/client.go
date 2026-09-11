@@ -2,6 +2,7 @@ package mux
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -72,10 +73,24 @@ func (c *Client) Wait() <-chan struct{} {
 	return c.sess.CloseChan()
 }
 
-// Quit asks the helper to exit.
+// Quit asks the helper to exit. The helper acts on quit at once and tears the
+// session down, so the write can return a shutdown error before it returns
+// success. That error means quit arrived, so it is success, not a failure.
 func (c *Client) Quit() error {
-	_, err := c.ctl.Write([]byte("quit\n"))
-	return err
+	if _, err := c.ctl.Write([]byte("quit\n")); err != nil && !sessionGone(err) {
+		return err
+	}
+	return nil
+}
+
+// sessionGone reports whether err means the session or its transport is
+// already closed, which is the expected outcome of a delivered quit.
+func sessionGone(err error) bool {
+	return errors.Is(err, yamux.ErrSessionShutdown) ||
+		errors.Is(err, yamux.ErrStreamClosed) ||
+		errors.Is(err, io.EOF) ||
+		errors.Is(err, io.ErrClosedPipe) ||
+		errors.Is(err, net.ErrClosed)
 }
 
 // Close ends the session and every stream.
