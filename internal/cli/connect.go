@@ -30,6 +30,7 @@ func newConnectCmd() *cobra.Command {
 	}
 	cmd.Flags().String("user", "", "the SSH user")
 	cmd.Flags().String("dns", "", "the DNS mode: none, split, or all")
+	cmd.Flags().StringArray("network", nil, "an extra CIDR to route, on top of the manifest and discovery, repeatable")
 	cmd.Flags().StringArray("exclude", nil, "a CIDR to exclude from the session, repeatable")
 	cmd.Flags().Bool("no-discovery", false, "skip discovery")
 	cmd.Flags().Bool("replace", false, "end the active session first")
@@ -39,6 +40,7 @@ func newConnectCmd() *cobra.Command {
 func runConnect(cmd *cobra.Command, args []string) error {
 	flagUser, _ := cmd.Flags().GetString("user")
 	dnsFlag, _ := cmd.Flags().GetString("dns")
+	networkFlags, _ := cmd.Flags().GetStringArray("network")
 	excludeFlags, _ := cmd.Flags().GetStringArray("exclude")
 	noDiscovery, _ := cmd.Flags().GetBool("no-discovery")
 	replace, _ := cmd.Flags().GetBool("replace")
@@ -63,7 +65,7 @@ func runConnect(cmd *cobra.Command, args []string) error {
 	}
 	defer func() { _ = client.Close() }()
 
-	plan, err := buildPlan(client, rr, cfg, args[0], dnsFlag, excludeFlags, noDiscovery)
+	plan, err := buildPlan(client, rr, cfg, args[0], dnsFlag, networkFlags, excludeFlags, noDiscovery)
 	if err != nil {
 		return err
 	}
@@ -81,7 +83,7 @@ func runConnect(cmd *cobra.Command, args []string) error {
 // mode, and picks the helper architecture. Discovery always runs, because the
 // helper architecture comes from it; --no-discovery drops only the
 // discovery-sourced networks.
-func buildPlan(client *sshc.Client, rr *resolvedRemote, cfg *config.Config, ref, dnsFlag string, excludeFlags []string, noDiscovery bool) (*session.Plan, error) {
+func buildPlan(client *sshc.Client, rr *resolvedRemote, cfg *config.Config, ref, dnsFlag string, networkFlags, excludeFlags []string, noDiscovery bool) (*session.Plan, error) {
 	res, err := discovery.Run(func(script string) ([]byte, error) {
 		return client.Run("sh", []byte(script))
 	})
@@ -100,7 +102,7 @@ func buildPlan(client *sshc.Client, rr *resolvedRemote, cfg *config.Config, ref,
 		}
 	}
 
-	networks, err := connectNetworks(m, res, cfg, rr, excludeFlags, noDiscovery)
+	networks, err := connectNetworks(m, res, cfg, rr, networkFlags, excludeFlags, noDiscovery)
 	if err != nil {
 		return nil, err
 	}
@@ -128,11 +130,16 @@ func buildPlan(client *sshc.Client, rr *resolvedRemote, cfg *config.Config, ref,
 	}, nil
 }
 
-func connectNetworks(m *manifest.Manifest, res *discovery.Result, cfg *config.Config, rr *resolvedRemote, excludeFlags []string, noDiscovery bool) ([]netip.Prefix, error) {
+func connectNetworks(m *manifest.Manifest, res *discovery.Result, cfg *config.Config, rr *resolvedRemote, networkFlags, excludeFlags []string, noDiscovery bool) ([]netip.Prefix, error) {
 	manifestNetworks, err := manifest.ParsePrefixes(m.Networks)
 	if err != nil {
 		return nil, fmt.Errorf("manifest networks: %w", err)
 	}
+	extraNetworks, err := manifest.ParsePrefixes(networkFlags)
+	if err != nil {
+		return nil, fmt.Errorf("--network: %w", err)
+	}
+	manifestNetworks = append(manifestNetworks, extraNetworks...)
 	manifestExclude, err := manifest.ParsePrefixes(m.Exclude)
 	if err != nil {
 		return nil, fmt.Errorf("manifest exclude: %w", err)

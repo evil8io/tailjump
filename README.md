@@ -77,7 +77,7 @@ interactively once and may ask for your password.
 | `tj list [--tag <tag>] [--probe] [--user <user>]` | List the online tailnet peers. `--probe` opens SSH to each and marks the ones with a manifest. |
 | `tj describe <remote> [--user <user>] [--no-discovery]` | Print the merged manifest, discovery result, and computed session networks for a remote, without starting a session. |
 | `tj doctor <remote> [--user <user>]` | Report readiness facts for a remote: peer online, SSH ok, manifest present, discovery ok, the computed session networks, and DNS mode availability. |
-| `tj connect <remote> [--user <user>] [--dns none\|split\|all] [--exclude <cidr>]... [--no-discovery] [--replace]` | Start a session into the remote's network. |
+| `tj connect <remote> [--user <user>] [--dns none\|split\|all] [--network <cidr>]... [--exclude <cidr>]... [--no-discovery] [--replace]` | Start a session into the remote's network. |
 | `tj disconnect` | End the active session. Not an error when none is active. |
 | `tj status [--json]` | Print the active session: the remote, the DNS mode, the networks, and the uptime. |
 | `tj version` | Print the tj version. |
