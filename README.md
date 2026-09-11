@@ -74,16 +74,18 @@ interactively once and may ask for your password.
 | Command | Does |
 | -- | -- |
 | `tj setup` | Install the sudoers rule and the root copy; check the required tools. |
-| `tj list [--tag <tag>] [--probe]` | List the online tailnet peers. `--probe` opens SSH to each and marks the ones with a manifest. |
+| `tj list [--tag <tag>] [--probe] [--user <user>]` | List the online tailnet peers. `--probe` opens SSH to each and marks the ones with a manifest. |
 | `tj describe <remote> [--user <user>] [--no-discovery]` | Print the merged manifest, discovery result, and computed session networks for a remote, without starting a session. |
-| `tj doctor <remote>` | Report readiness facts for a remote: peer online, SSH ok, manifest present, discovery ok, the computed session networks, and DNS mode availability. |
+| `tj doctor <remote> [--user <user>]` | Report readiness facts for a remote: peer online, SSH ok, manifest present, discovery ok, the computed session networks, and DNS mode availability. |
 | `tj connect <remote> [--user <user>] [--dns none\|split\|all] [--exclude <cidr>]... [--no-discovery] [--replace]` | Start a session into the remote's network. |
 | `tj disconnect` | End the active session. Not an error when none is active. |
 | `tj status [--json]` | Print the active session: the remote, the DNS mode, the networks, and the uptime. |
 | `tj version` | Print the tj version. |
 
 `<remote>` is a hostname, a tag such as `tag:example`, or an alias from the
-local config. `list`, `describe`, `status`, and `doctor` also accept
+local config. The SSH user defaults to your local username; pass `--user`
+(for example `--user root`) or set `defaults.user` in the config for a
+gateway that requires a specific user. `list`, `describe`, `status`, and `doctor` also accept
 `--json`. `-v` on any command enables debug logging.
 
 `tj connect` exits 3, and names the active session, when one is already
