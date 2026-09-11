@@ -1,6 +1,6 @@
 # Rig image for the tj e2e test: Ubuntu with systemd and systemd-resolved, so
 # the session runs as a transient unit and applies DNS the way it does on a
-# laptop. See docs/architecture.md, "Testing".
+# client. See docs/architecture.md, "Testing".
 FROM ubuntu:26.04
 
 ENV DEBIAN_FRONTEND=noninteractive

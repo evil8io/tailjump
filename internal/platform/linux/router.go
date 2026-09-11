@@ -62,7 +62,7 @@ func (r *Router) Remove(device string, prefixes []netip.Prefix) error {
 	return nil
 }
 
-// Connected returns the laptop's connected subnets, without the loopback and
+// Connected returns the client's connected subnets, without the loopback and
 // without the tj device, so the session network computation subtracts them.
 func (r *Router) Connected() ([]netip.Prefix, error) {
 	routes, err := netlink.RouteList(nil, netlink.FAMILY_ALL)

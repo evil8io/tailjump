@@ -33,7 +33,7 @@ printf '\n'
 `
 
 // reserved lists the ranges a session never routes, on top of the manifest
-// excludes and the laptop's own subnets. It mirrors internal/manifest's
+// excludes and the client's own subnets. It mirrors internal/manifest's
 // unexported reserved list, for display only: describe and doctor show why
 // a range disappeared from the session networks.
 var reservedForDisplay = []string{
@@ -160,11 +160,11 @@ func addrStrings(addrs []netip.Addr) []string {
 	return out
 }
 
-// laptopConnected returns the laptop's connected subnets. Router.Connected
+// clientConnected returns the client's connected subnets. Router.Connected
 // is not implemented yet in this chunk (a later chunk fills in the
 // platform Router), so a "not implemented" error is not fatal here: the
 // session network computation proceeds without that exclusion.
-func laptopConnected() []netip.Prefix {
+func clientConnected() []netip.Prefix {
 	prefixes, err := platform.New().Router.Connected()
 	if err != nil {
 		return nil

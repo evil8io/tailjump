@@ -14,7 +14,7 @@ import (
 )
 
 // deviceName is the tj TUN device name. Router.Connected excludes it from the
-// laptop's connected subnets.
+// client's connected subnets.
 const deviceName = "tj0"
 
 // Device implements platform.Device for Linux. It creates the TUN through the

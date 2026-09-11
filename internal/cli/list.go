@@ -27,6 +27,7 @@ func newListCmd() *cobra.Command {
 	}
 	cmd.Flags().String("tag", "", "list only peers with this tag")
 	cmd.Flags().Bool("probe", false, "open SSH to each peer and mark the ones with a manifest")
+	cmd.Flags().String("user", "", "the SSH user for --probe")
 	cmd.Flags().Bool("json", false, "print JSON output")
 	return cmd
 }
@@ -43,6 +44,7 @@ func runList(cmd *cobra.Command, _ []string) error {
 	tag, _ := cmd.Flags().GetString("tag")
 	probe, _ := cmd.Flags().GetBool("probe")
 	asJSON, _ := cmd.Flags().GetBool("json")
+	flagUser, _ := cmd.Flags().GetString("user")
 	if tag != "" && !tailnet.IsTagRef(tag) {
 		tag = "tag:" + tag
 	}
@@ -69,7 +71,7 @@ func runList(cmd *cobra.Command, _ []string) error {
 		if tag != "" && !tailnet.HasTag(p.Tags, tag) {
 			continue
 		}
-		entries = append(entries, buildListEntry(ctx, p, probe, cfg))
+		entries = append(entries, buildListEntry(ctx, p, probe, cfg, flagUser))
 	}
 
 	if asJSON {
@@ -78,7 +80,7 @@ func runList(cmd *cobra.Command, _ []string) error {
 	return printListTable(cmd, entries, probe)
 }
 
-func buildListEntry(ctx context.Context, p tailnet.Peer, probe bool, cfg *config.Config) listEntry {
+func buildListEntry(ctx context.Context, p tailnet.Peer, probe bool, cfg *config.Config, flagUser string) listEntry {
 	entry := listEntry{HostName: p.HostName, Tags: p.Tags}
 
 	addr, err := p.IPv4()
@@ -89,7 +91,7 @@ func buildListEntry(ctx context.Context, p tailnet.Peer, probe bool, cfg *config
 	entry.Address = addr.String()
 
 	if probe {
-		has, perr := probeManifest(ctx, p, addr, cfg)
+		has, perr := probeManifest(ctx, p, addr, cfg, flagUser)
 		if perr != nil {
 			entry.Error = perr.Error()
 		} else {
@@ -101,11 +103,11 @@ func buildListEntry(ctx context.Context, p tailnet.Peer, probe bool, cfg *config
 
 // probeManifest opens a short-lived SSH connection to the peer and runs
 // discovery, returning whether the remote advertises a manifest.
-func probeManifest(ctx context.Context, p tailnet.Peer, addr netip.Addr, cfg *config.Config) (bool, error) {
+func probeManifest(ctx context.Context, p tailnet.Peer, addr netip.Addr, cfg *config.Config, flagUser string) (bool, error) {
 	ctx, cancel := context.WithTimeout(ctx, probeTimeout)
 	defer cancel()
 
-	user := sshUser("", "", cfg)
+	user := sshUser(flagUser, "", cfg)
 	client, err := sshc.Dial(ctx, addr, p.HostName, user, knownHostsCacheDir())
 	if err != nil {
 		return false, err

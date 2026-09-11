@@ -33,10 +33,10 @@ func startFakeLocalAPI(t *testing.T, body string) string {
 
 func TestStatusParsesSelfAndPeers(t *testing.T) {
 	sock := startFakeLocalAPI(t, `{
-		"Self": {"HostName":"laptop","Online":true,"TailscaleIPs":["100.64.0.1"]},
+		"Self": {"HostName":"client","Online":true,"TailscaleIPs":["100.64.0.1"]},
 		"Peer": {
 			"nodekey:a": {"HostName":"gw","Tags":["tag:example"],"Online":true,"TailscaleIPs":["100.64.0.2","fd7a:115c:a1e0::2"]},
-			"nodekey:b": {"HostName":"laptop2","Online":false,"TailscaleIPs":["100.64.0.3"]}
+			"nodekey:b": {"HostName":"client2","Online":false,"TailscaleIPs":["100.64.0.3"]}
 		}
 	}`)
 
@@ -48,7 +48,7 @@ func TestStatusParsesSelfAndPeers(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Status: %v", err)
 	}
-	if st.Self.HostName != "laptop" {
+	if st.Self.HostName != "client" {
 		t.Fatalf("self: %+v", st.Self)
 	}
 	if len(st.Peers) != 2 {
@@ -77,7 +77,7 @@ func TestStatusParsesSelfAndPeers(t *testing.T) {
 
 func TestStatusUntaggedPeerHasNilTags(t *testing.T) {
 	sock := startFakeLocalAPI(t, `{
-		"Self": {"HostName":"laptop","Online":true,"TailscaleIPs":["100.64.0.1"]},
+		"Self": {"HostName":"client","Online":true,"TailscaleIPs":["100.64.0.1"]},
 		"Peer": {
 			"nodekey:a": {"HostName":"plain","Online":true,"TailscaleIPs":["100.64.0.4"]}
 		}
@@ -98,7 +98,7 @@ func TestStatusUntaggedPeerHasNilTags(t *testing.T) {
 
 func TestStatusRejectsBadAddress(t *testing.T) {
 	sock := startFakeLocalAPI(t, `{
-		"Self": {"HostName":"laptop","Online":true,"TailscaleIPs":["100.64.0.1"]},
+		"Self": {"HostName":"client","Online":true,"TailscaleIPs":["100.64.0.1"]},
 		"Peer": {
 			"nodekey:a": {"HostName":"bad","Online":true,"TailscaleIPs":["not-an-ip"]}
 		}

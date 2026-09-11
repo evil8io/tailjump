@@ -22,7 +22,7 @@ const (
 
 // deviceAddrs are the tj0 addresses. The global-scope ULA is required as an
 // IPv6 source: RFC 6724 rejects a link-local source for a global
-// destination, so a laptop without global IPv6 would otherwise have no
+// destination, so a client without global IPv6 would otherwise have no
 // source at all.
 var deviceAddrs = []netip.Prefix{
 	netip.MustParsePrefix("169.254.117.1/32"),

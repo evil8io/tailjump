@@ -19,10 +19,11 @@ import (
 func newDoctorCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "doctor <remote>",
-		Short: "Run the manifest checks from the remote and from the laptop",
+		Short: "Run the manifest checks from the remote and from the client",
 		Args:  cobra.ExactArgs(1),
 		RunE:  runDoctor,
 	}
+	cmd.Flags().String("user", "", "the SSH user")
 	cmd.Flags().Bool("json", false, "print JSON output")
 	return cmd
 }
@@ -37,6 +38,7 @@ type doctorCheck struct {
 
 func runDoctor(cmd *cobra.Command, args []string) error {
 	asJSON, _ := cmd.Flags().GetBool("json")
+	flagUser, _ := cmd.Flags().GetString("user")
 	ctx := cmd.Context()
 
 	cfg, err := loadLocalConfig()
@@ -54,7 +56,7 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	rr, err := resolveRemote(ctx, newTailnetClient(), cfg, args[0], "")
+	rr, err := resolveRemote(ctx, newTailnetClient(), cfg, args[0], flagUser)
 	addErr("peer online", err)
 	if err != nil {
 		return printDoctor(cmd, checks, asJSON)
@@ -152,7 +154,7 @@ func doctorSessionNetworks(m *manifest.Manifest, res *discovery.Result, cfg *con
 		DiscoveryLinkRoutes: linkRoutes,
 		DiscoveryCloud:      cloudNets,
 		RemoteAddrs:         rr.Peer.TailscaleIPs,
-		LaptopConnected:     laptopConnected(),
+		ClientConnected:     clientConnected(),
 		LocalExclude:        localExclude,
 	})
 }

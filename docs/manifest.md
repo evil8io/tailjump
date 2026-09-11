@@ -46,7 +46,7 @@ checks:
 | `exclude` | list of CIDR | no | Networks the session never routes, regardless of `networks` or discovery. |
 | `dns.servers` | list of IP | no | The DNS servers a `split` or `all` session uses. Default: the resolvers discovery finds on the remote. |
 | `dns.domains` | list of domain | no | The domains a `split` session sends to `dns.servers`. Required for `split`; `tj connect --dns split` refuses and names the missing key without them. |
-| `checks` | list of check | no | TCP endpoints `tj doctor` tests, from the remote and from the laptop. |
+| `checks` | list of check | no | TCP endpoints `tj doctor` tests, from the remote and from the client. |
 | `checks[].name` | string | yes, inside a check | A label for the check line in `tj doctor` output. |
 | `checks[].tcp` | `host:port` | yes, inside a check | The endpoint to dial. |
 
@@ -72,7 +72,7 @@ manifest networks
 + discovery cloud CIDRs   (when discovery.cloud_metadata is on, and not --no-discovery)
 - manifest exclude
 - the reserved ranges and the remote's tailnet addresses
-- the laptop's own connected subnets
+- the client's own connected subnets
 - the local config exclude list and every --exclude flag
 ```
 
@@ -89,9 +89,9 @@ or to the discovered resolvers when the manifest sets none.
 ## Checks
 
 Each entry in `checks` names a TCP endpoint. `tj doctor <remote>` dials
-every check both from the remote, over the mux, and from the laptop
+every check both from the remote, over the mux, and from the client
 directly, and prints a pass or a fail line per check per side. A check with
-no working path from the laptop is not necessarily a problem: it may become
+no working path from the client is not necessarily a problem: it may become
 reachable only once a session is up and routing its network.
 
 ## See also

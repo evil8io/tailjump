@@ -21,7 +21,7 @@ Repository: https://github.com/evil8io/tailjump. Binary name: `tj`. Language: Go
 
 * **remote**: the tailnet node that a session uses. sshuttle calls it `--remote`.
 * **manifest**: the config file that a remote advertises.
-* **session**: one active connection from the laptop to one remote.
+* **session**: one active connection from the client to one remote.
 * **helper**: the tj binary that the client uploads to the remote for the session.
 * **session networks**: the set of CIDRs that a session routes.
 
@@ -82,7 +82,7 @@ checks:
 * `exclude`: CIDRs that a session never routes.
 * `dns.servers`: absent means the discovered resolvers.
 * `dns.domains`: absent means the `split` mode is not available, and the client says so.
-* `checks`: TCP endpoints that `tj doctor` tests from the remote and from the laptop.
+* `checks`: TCP endpoints that `tj doctor` tests from the remote and from the client.
 
 The client always excludes the tailnet range 100.64.0.0/10 and the remote's own address, so the manifest does not list them.
 
@@ -100,7 +100,7 @@ The script version is the client version. Discovery cannot list routes beyond th
 
 * One session is active at a time. `connect` refuses when a session is active and names it. `--replace` ends the active session first.
 * A session ends on `disconnect`, on logout, or on a failed liveness check. It never restarts after a reboot.
-* The session networks: the manifest `networks` plus the discovery result, minus the manifest `exclude`, minus the tailnet range, minus the remote's address, minus the laptop's connected subnets, minus the local excludes and the `--exclude` flags.
+* The session networks: the manifest `networks` plus the discovery result, minus the manifest `exclude`, minus the tailnet range, minus the remote's address, minus the client's connected subnets, minus the local excludes and the `--exclude` flags.
 * The client writes state to the runtime directory and logs to the journal.
 
 ### C5. The tailnet policy
@@ -147,7 +147,7 @@ The policy needs one SSH rule per remote and user. Nothing else. A tag is option
 * `tj setup`: sudoers rule, tool checks.
 * `tj list [--tag <tag>] [--probe]`: online peers; `--probe` opens SSH to each with a short timeout and marks the ones with a manifest; results are cached.
 * `tj describe <remote>`: the merged config without a session.
-* `tj doctor <remote>`: runs the manifest checks from the remote and from the laptop.
+* `tj doctor <remote>`: runs the manifest checks from the remote and from the client.
 * `tj connect <remote> [--user <ssh-user>] [--dns none|split|all] [--exclude <cidr>]... [--no-discovery] [--replace]`
 * `tj disconnect`
 * `tj status`: the active session, its networks, the DNS mode, the remote, and the uptime.
@@ -195,7 +195,7 @@ Chunk 8 is a separate story in the iac-modules flow.
 
 ## 10. Acceptance criteria for v1
 
-* On a current Ubuntu laptop, `tj connect` to the shared gateway gives TCP, UDP, and DNS to the VPC CIDRs, IPv4 and IPv6.
+* On a current Ubuntu client, `tj connect` to the shared gateway gives TCP, UDP, and DNS to the VPC CIDRs, IPv4 and IPv6.
 * `tailscale status --json` shows no primary routes on the remote before, during, and after a session.
 * No file remains on the remote after `disconnect`.
 * `tj connect` with an active session refuses and names the session.
