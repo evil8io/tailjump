@@ -1,7 +1,7 @@
 # tailjump
 
 `tj` gives an engineer a session into a remote network over Tailscale SSH,
-the way sshuttle does. Start a session with one command, reach every
+the way [sshuttle](https://github.com/sshuttle/sshuttle) does. Start a session with one command, reach every
 network the remote gives you, and end it with one command; the remote runs
 no installed software, advertises no subnet routes, and keeps no state
 between sessions.
@@ -24,15 +24,38 @@ full list.
 
 ## Install
 
-Add tj to `mise.toml`:
+### Prebuilt binary (recommended)
+
+Download the archive for your OS and architecture from the
+[releases page](https://github.com/evil8io/tailjump/releases), then put `tj`
+on your `PATH`:
+
+```
+tar -xzf tj_<version>_<os>_<arch>.tar.gz tj
+sudo install tj /usr/local/bin/tj
+```
+
+The release binary ships with the remote helper built in.
+
+### With mise
 
 ```toml
 [tools]
 "github:evil8io/tailjump" = "latest"
 ```
 
-The repository is private, so mise needs a `GITHUB_TOKEN` with read access
-to it in its environment to install the tool.
+### From source
+
+```
+go install github.com/evil8io/tailjump/cmd/tj@latest
+```
+
+A source build embeds no remote helper, so `tj connect` needs a release
+build or a local `task helpers` run. The read-only commands `tj list`,
+`describe`, and `doctor` work either way.
+
+While the repository is private, the prebuilt and mise options need a
+`GITHUB_TOKEN` with read access in the environment.
 
 ## Setup
 
