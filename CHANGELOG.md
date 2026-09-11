@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.2.0](https://github.com/evil8io/tailjump/compare/v1.1.0...v1.2.0) (2026-09-11)
+
+
+### Features
+
+* **cli:** add config management commands and client debug logging ([#6](https://github.com/evil8io/tailjump/issues/6)) ([a1ff500](https://github.com/evil8io/tailjump/commit/a1ff50083fcb9b1e76e07336f6ed28320b69ecdd))
+
 ## [1.1.0](https://github.com/evil8io/tailjump/compare/v1.0.0...v1.1.0) (2026-09-11)
 
 
