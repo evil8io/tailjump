@@ -3,6 +3,7 @@ package cli
 import (
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/netip"
 	"strings"
 	"text/tabwriter"
@@ -65,7 +66,7 @@ func runDescribe(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	client, err := sshc.Dial(ctx, rr.Addr, rr.Peer.HostName, rr.User, knownHostsCacheDir())
+	client, err := dialRemote(ctx, rr.Addr, rr.Peer.HostName, rr.User)
 	if err != nil {
 		return fmt.Errorf("ssh dial %s: %w", rr.Peer.HostName, err)
 	}
@@ -99,9 +100,7 @@ func buildDescribeOutput(client *sshc.Client, rr *resolvedRemote, cfg *config.Co
 		}
 		manifestPath, manifestBody = p, body
 	} else {
-		res, err := discovery.Run(func(script string) ([]byte, error) {
-			return client.Run("sh", []byte(script))
-		})
+		res, err := runDiscovery(client)
 		if err != nil {
 			return nil, fmt.Errorf("discovery: %w", err)
 		}
@@ -122,15 +121,19 @@ func buildDescribeOutput(client *sshc.Client, rr *resolvedRemote, cfg *config.Co
 		m = parsed
 	}
 
-	manifestNetworks, err := manifest.ParsePrefixes(m.Networks)
+	// Include the remote manifest and discovery, plus the remote-config
+	// networks; exclude the manifest, config, and remote-config excludes.
+	includeNetworks := append(append([]string{}, m.Networks...), rr.Config.Networks...)
+	manifestNetworks, err := manifest.ParsePrefixes(includeNetworks)
 	if err != nil {
-		return nil, fmt.Errorf("manifest networks: %w", err)
+		return nil, fmt.Errorf("networks: %w", err)
 	}
 	manifestExclude, err := manifest.ParsePrefixes(m.Exclude)
 	if err != nil {
 		return nil, fmt.Errorf("manifest exclude: %w", err)
 	}
-	localExclude, err := manifest.ParsePrefixes(cfg.Exclude)
+	localExcludeList := append(append([]string{}, cfg.Exclude...), rr.Config.Exclude...)
+	localExclude, err := manifest.ParsePrefixes(localExcludeList)
 	if err != nil {
 		return nil, fmt.Errorf("local config exclude: %w", err)
 	}
@@ -163,6 +166,7 @@ func buildDescribeOutput(client *sshc.Client, rr *resolvedRemote, cfg *config.Co
 	if err != nil {
 		return nil, fmt.Errorf("compute session networks: %w", err)
 	}
+	slog.Debug("session networks", "count", len(networks), "networks", prefixStrings(networks))
 
 	source := manifestPath
 	if source == "" {
@@ -181,7 +185,7 @@ func buildDescribeOutput(client *sshc.Client, rr *resolvedRemote, cfg *config.Co
 			Reserved:        reservedForDisplay,
 			RemoteAddrs:     addrStrings(rr.Peer.TailscaleIPs),
 			ClientConnected: prefixStrings(connected),
-			LocalExclude:    cfg.Exclude,
+			LocalExclude:    localExcludeList,
 		},
 		Networks: prefixStrings(networks),
 	}, nil

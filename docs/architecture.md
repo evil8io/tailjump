@@ -241,9 +241,15 @@ remotes:
     host: shared-gateway
     user: root
     dns: all
+    networks:
+      - 10.0.0.0/8
+    exclude:
+      - 10.1.0.0/24
 ```
 
 The SSH user defaults to the local username. The precedence is the flag, then `remotes.<name>`, then `defaults`. A remote's host is the base hostname; resolution tolerates a Tailscale collision suffix. Prefer a tag for a gateway that an AMI replacement recreates.
+
+A remote's `networks` and `exclude` feed the session network computation: `networks` add to the routed set alongside the manifest, discovery, and the `--network` flags, and `exclude` drops from it alongside `config.exclude`, the manifest exclude, and the `--exclude` flags. See "Session networks". `tj config` writes the defaults and the global exclude; `tj remote` writes the aliases.
 
 ### CLI conventions
 
@@ -275,4 +281,3 @@ Download of 256 MiB, median of 3 runs, from the shared gateway over a WiFi clien
 | sshuttle 1.3.2 | 8.5 |
 
 tj reaches 96% of the raw SSH channel and 6.1 times sshuttle. The only setting with a measurable effect is the yamux `MaxStreamWindowSize` at 4 MiB; the 256 KiB default equals the path's bandwidth-delay product. The netstack receive buffer and SACK have no effect, because the only connection the netstack terminates is the lossless local leg over the TUN. One 256 MiB download costs the client 7.1% of one core and the helper 1.7%. The helper upload takes 291 ms, which is 90 Mbit/s.
-

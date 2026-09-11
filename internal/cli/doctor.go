@@ -3,6 +3,7 @@ package cli
 import (
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/netip"
 	"text/tabwriter"
 
@@ -13,7 +14,6 @@ import (
 	"github.com/evil8io/tailjump/internal/dns"
 	"github.com/evil8io/tailjump/internal/manifest"
 	"github.com/evil8io/tailjump/internal/platform"
-	"github.com/evil8io/tailjump/internal/sshc"
 )
 
 func newDoctorCmd() *cobra.Command {
@@ -63,7 +63,7 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 	}
 	add("peer", fmt.Sprintf("%s (%s)", rr.Peer.HostName, rr.Addr))
 
-	client, err := sshc.Dial(ctx, rr.Addr, rr.Peer.HostName, rr.User, knownHostsCacheDir())
+	client, err := dialRemote(ctx, rr.Addr, rr.Peer.HostName, rr.User)
 	addErr("ssh ok", err)
 	if err != nil {
 		return printDoctor(cmd, checks, asJSON)
@@ -71,9 +71,7 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 	defer func() { _ = client.Close() }()
 	add("banner", "printed to stderr, if the remote sent one")
 
-	res, err := discovery.Run(func(script string) ([]byte, error) {
-		return client.Run("sh", []byte(script))
-	})
+	res, err := runDiscovery(client)
 	addErr("discovery ok", err)
 	if err != nil {
 		return printDoctor(cmd, checks, asJSON)
@@ -123,15 +121,19 @@ func decodeDoctorManifest(res *discovery.Result) (*manifest.Manifest, error) {
 // so tj doctor and tj describe report the same session networks for the
 // same remote.
 func doctorSessionNetworks(m *manifest.Manifest, res *discovery.Result, cfg *config.Config, rr *resolvedRemote) ([]netip.Prefix, error) {
-	manifestNetworks, err := manifest.ParsePrefixes(m.Networks)
+	// Include the remote manifest and discovery, plus the remote-config
+	// networks; exclude the manifest, config, and remote-config excludes.
+	includeNetworks := append(append([]string{}, m.Networks...), rr.Config.Networks...)
+	manifestNetworks, err := manifest.ParsePrefixes(includeNetworks)
 	if err != nil {
-		return nil, fmt.Errorf("manifest networks: %w", err)
+		return nil, fmt.Errorf("networks: %w", err)
 	}
 	manifestExclude, err := manifest.ParsePrefixes(m.Exclude)
 	if err != nil {
 		return nil, fmt.Errorf("manifest exclude: %w", err)
 	}
-	localExclude, err := manifest.ParsePrefixes(cfg.Exclude)
+	localExcludeList := append(append([]string{}, cfg.Exclude...), rr.Config.Exclude...)
+	localExclude, err := manifest.ParsePrefixes(localExcludeList)
 	if err != nil {
 		return nil, fmt.Errorf("local config exclude: %w", err)
 	}
@@ -148,7 +150,7 @@ func doctorSessionNetworks(m *manifest.Manifest, res *discovery.Result, cfg *con
 		}
 	}
 
-	return manifest.ComputeNetworks(manifest.Inputs{
+	networks, err := manifest.ComputeNetworks(manifest.Inputs{
 		ManifestNetworks:    manifestNetworks,
 		ManifestExclude:     manifestExclude,
 		DiscoveryLinkRoutes: linkRoutes,
@@ -157,6 +159,11 @@ func doctorSessionNetworks(m *manifest.Manifest, res *discovery.Result, cfg *con
 		ClientConnected:     clientConnected(),
 		LocalExclude:        localExclude,
 	})
+	if err != nil {
+		return nil, err
+	}
+	slog.Debug("session networks", "count", len(networks), "networks", prefixStrings(networks))
+	return networks, nil
 }
 
 func valueOrAbsent(s string) string {

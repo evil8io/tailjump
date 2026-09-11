@@ -4,6 +4,7 @@ package config
 import (
 	"errors"
 	"os"
+	"path/filepath"
 
 	"gopkg.in/yaml.v3"
 )
@@ -24,9 +25,11 @@ type Defaults struct {
 
 // RemoteConfig is one entry under remotes.
 type RemoteConfig struct {
-	Host string `yaml:"host"`
-	User string `yaml:"user"`
-	DNS  string `yaml:"dns"`
+	Host     string   `yaml:"host,omitempty" json:"host,omitempty"`
+	User     string   `yaml:"user,omitempty" json:"user,omitempty"`
+	DNS      string   `yaml:"dns,omitempty" json:"dns,omitempty"`
+	Networks []string `yaml:"networks,omitempty" json:"networks,omitempty"`
+	Exclude  []string `yaml:"exclude,omitempty" json:"exclude,omitempty"`
 }
 
 // Load reads the config at path. A missing file returns a zero Config.
@@ -43,4 +46,17 @@ func Load(path string) (*Config, error) {
 		return nil, err
 	}
 	return &c, nil
+}
+
+// Save writes c to path as YAML. It creates the parent directory when it is
+// absent.
+func Save(path string, c *Config) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	b, err := yaml.Marshal(c)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, b, 0o644)
 }

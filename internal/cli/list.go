@@ -12,8 +12,6 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/evil8io/tailjump/internal/config"
-	"github.com/evil8io/tailjump/internal/discovery"
-	"github.com/evil8io/tailjump/internal/sshc"
 	"github.com/evil8io/tailjump/internal/tailnet"
 )
 
@@ -108,15 +106,13 @@ func probeManifest(ctx context.Context, p tailnet.Peer, addr netip.Addr, cfg *co
 	defer cancel()
 
 	user := sshUser(flagUser, "", cfg)
-	client, err := sshc.Dial(ctx, addr, p.HostName, user, knownHostsCacheDir())
+	client, err := dialRemote(ctx, addr, p.HostName, user)
 	if err != nil {
 		return false, err
 	}
 	defer func() { _ = client.Close() }()
 
-	res, err := discovery.Run(func(script string) ([]byte, error) {
-		return client.Run("sh", []byte(script))
-	})
+	res, err := runDiscovery(client)
 	if err != nil {
 		return false, err
 	}

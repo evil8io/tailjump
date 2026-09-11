@@ -2,6 +2,7 @@ package config
 
 import (
 	"path/filepath"
+	"reflect"
 	"testing"
 )
 
@@ -34,5 +35,33 @@ func TestLoadParsesRemotes(t *testing.T) {
 	}
 	if len(c.Exclude) != 1 || c.Exclude[0] != "192.168.0.0/16" {
 		t.Fatalf("exclude: %+v", c.Exclude)
+	}
+}
+
+func TestSaveRoundTrip(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "sub", "config.yaml")
+	want := &Config{
+		Version:  1,
+		Defaults: Defaults{User: "root", DNS: "split"},
+		Exclude:  []string{"192.168.0.0/16"},
+		Remotes: map[string]RemoteConfig{
+			"evil8": {
+				Host:     "gw.example",
+				User:     "root",
+				DNS:      "all",
+				Networks: []string{"10.0.0.0/16"},
+				Exclude:  []string{"10.1.0.0/24"},
+			},
+		},
+	}
+	if err := Save(p, want); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	got, err := Load(p)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("round trip: got %+v, want %+v", got, want)
 	}
 }
