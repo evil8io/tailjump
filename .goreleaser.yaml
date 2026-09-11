@@ -38,3 +38,4 @@ release:
   github:
     owner: evil8io
     name: tailjump
+  mode: append
