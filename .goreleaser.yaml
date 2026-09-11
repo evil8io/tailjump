@@ -39,3 +39,4 @@ release:
     owner: evil8io
     name: tailjump
   mode: append
+  mode: append
