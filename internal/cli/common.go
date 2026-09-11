@@ -4,11 +4,13 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"log/slog"
 	"net/netip"
 	"os/user"
 	"path/filepath"
 
 	"github.com/evil8io/tailjump/internal/config"
+	"github.com/evil8io/tailjump/internal/discovery"
 	"github.com/evil8io/tailjump/internal/platform"
 	"github.com/evil8io/tailjump/internal/sshc"
 	"github.com/evil8io/tailjump/internal/tailnet"
@@ -57,11 +59,25 @@ func knownHostsCacheDir() string {
 	return platform.New().Paths.CacheDir()
 }
 
-// loadLocalConfig reads $XDG_CONFIG_HOME/tj/config.yaml. A missing file is
-// not an error: config.Load returns a zero Config for it.
+// localConfigPath is $XDG_CONFIG_HOME/tj/config.yaml, the file tj reads and
+// the tj remote and tj config commands write.
+func localConfigPath() string {
+	return filepath.Join(platform.New().Paths.ConfigDir(), "config.yaml")
+}
+
+// loadLocalConfig reads the local config. A missing file is not an error:
+// config.Load returns a zero Config for it.
 func loadLocalConfig() (*config.Config, error) {
-	dir := platform.New().Paths.ConfigDir()
-	return config.Load(filepath.Join(dir, "config.yaml"))
+	return config.Load(localConfigPath())
+}
+
+// saveLocalConfig writes cfg to path. It defaults the schema version to 1,
+// so a config created by the first tj remote or tj config write is valid.
+func saveLocalConfig(path string, cfg *config.Config) error {
+	if cfg.Version == 0 {
+		cfg.Version = 1
+	}
+	return config.Save(path, cfg)
 }
 
 // resolveAlias expands a config alias to its host and its preferred SSH
@@ -94,11 +110,13 @@ func sshUser(flagUser, remoteUser string, cfg *config.Config) string {
 }
 
 // resolvedRemote is one online peer resolved from a CLI argument, with the
-// IPv4 tailnet address the SSH client dials.
+// IPv4 tailnet address the SSH client dials. Config is the matched config
+// entry, the zero value when ref is a bare hostname or tag.
 type resolvedRemote struct {
-	Peer tailnet.Peer
-	Addr netip.Addr
-	User string
+	Peer   tailnet.Peer
+	Addr   netip.Addr
+	User   string
+	Config config.RemoteConfig
 }
 
 // resolveRemote expands a config alias, fetches the tailnet status, and
@@ -110,6 +128,7 @@ func resolveRemote(ctx context.Context, tn *tailnet.Client, cfg *config.Config, 
 	if err != nil {
 		return nil, fmt.Errorf("tailnet status: %w", err)
 	}
+	slog.Debug("tailnet status", "peers", len(st.Peers))
 	peer, err := tailnet.Resolve(st.Peers, host)
 	if err != nil {
 		return nil, err
@@ -118,11 +137,44 @@ func resolveRemote(ctx context.Context, tn *tailnet.Client, cfg *config.Config, 
 	if err != nil {
 		return nil, err
 	}
+	dialUser := sshUser(flagUser, aliasUser, cfg)
+	slog.Debug("resolved remote", "ref", ref, "host", host, "addr", addr, "user", dialUser)
 	return &resolvedRemote{
-		Peer: *peer,
-		Addr: addr,
-		User: sshUser(flagUser, aliasUser, cfg),
+		Peer:   *peer,
+		Addr:   addr,
+		User:   dialUser,
+		Config: cfg.Remotes[ref],
 	}, nil
+}
+
+// dialRemote opens SSH to addr, with a debug log naming the target.
+func dialRemote(ctx context.Context, addr netip.Addr, hostname, user string) (*sshc.Client, error) {
+	slog.Debug("ssh dial", "addr", addr, "hostname", hostname, "user", user)
+	return sshc.Dial(ctx, addr, hostname, user, knownHostsCacheDir())
+}
+
+// runDiscovery runs discovery over client, with a debug log before and a
+// one-line summary after.
+func runDiscovery(client *sshc.Client) (*discovery.Result, error) {
+	slog.Debug("running discovery")
+	res, err := discovery.Run(func(script string) ([]byte, error) {
+		return client.Run("sh", []byte(script))
+	})
+	if err != nil {
+		return nil, err
+	}
+	cloudNets := 0
+	if res.Cloud != nil {
+		cloudNets = len(res.Cloud.Networks)
+	}
+	slog.Debug("discovery complete",
+		"manifest", valueOrAbsent(res.ManifestPath),
+		"exec_dir", res.ExecDir,
+		"link_routes", len(res.LinkRoutes),
+		"cloud", cloudNets,
+		"resolvers", len(res.Resolvers),
+	)
+	return res, nil
 }
 
 // fetchManifestOnly runs manifestOnlyScript over client and splits its

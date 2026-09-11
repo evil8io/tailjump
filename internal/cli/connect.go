@@ -3,6 +3,7 @@ package cli
 import (
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/netip"
 	"os"
 
@@ -59,7 +60,7 @@ func runConnect(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	client, err := sshc.Dial(ctx, rr.Addr, rr.Peer.HostName, rr.User, knownHostsCacheDir())
+	client, err := dialRemote(ctx, rr.Addr, rr.Peer.HostName, rr.User)
 	if err != nil {
 		return fmt.Errorf("ssh dial %s: %w", rr.Peer.HostName, err)
 	}
@@ -84,9 +85,7 @@ func runConnect(cmd *cobra.Command, args []string) error {
 // helper architecture comes from it; --no-discovery drops only the
 // discovery-sourced networks.
 func buildPlan(client *sshc.Client, rr *resolvedRemote, cfg *config.Config, ref, dnsFlag string, networkFlags, excludeFlags []string, noDiscovery bool) (*session.Plan, error) {
-	res, err := discovery.Run(func(script string) ([]byte, error) {
-		return client.Run("sh", []byte(script))
-	})
+	res, err := runDiscovery(client)
 	if err != nil {
 		return nil, fmt.Errorf("discovery: %w", err)
 	}
@@ -119,6 +118,7 @@ func buildPlan(client *sshc.Client, rr *resolvedRemote, cfg *config.Config, ref,
 	if err != nil {
 		return nil, err
 	}
+	slog.Debug("session networks", "count", len(networks), "networks", prefixStrings(networks), "dns", mode)
 
 	return &session.Plan{
 		Remote:     rr.Peer.HostName,
@@ -131,20 +131,22 @@ func buildPlan(client *sshc.Client, rr *resolvedRemote, cfg *config.Config, ref,
 }
 
 func connectNetworks(m *manifest.Manifest, res *discovery.Result, cfg *config.Config, rr *resolvedRemote, networkFlags, excludeFlags []string, noDiscovery bool) ([]netip.Prefix, error) {
-	manifestNetworks, err := manifest.ParsePrefixes(m.Networks)
+	// Include the remote manifest and discovery, plus the remote-config and
+	// flag networks; exclude the manifest, config, remote-config, and flag
+	// excludes.
+	includeNetworks := append(append([]string{}, m.Networks...), rr.Config.Networks...)
+	includeNetworks = append(includeNetworks, networkFlags...)
+	manifestNetworks, err := manifest.ParsePrefixes(includeNetworks)
 	if err != nil {
-		return nil, fmt.Errorf("manifest networks: %w", err)
+		return nil, fmt.Errorf("networks: %w", err)
 	}
-	extraNetworks, err := manifest.ParsePrefixes(networkFlags)
-	if err != nil {
-		return nil, fmt.Errorf("--network: %w", err)
-	}
-	manifestNetworks = append(manifestNetworks, extraNetworks...)
 	manifestExclude, err := manifest.ParsePrefixes(m.Exclude)
 	if err != nil {
 		return nil, fmt.Errorf("manifest exclude: %w", err)
 	}
-	localExclude, err := manifest.ParsePrefixes(append(append([]string{}, cfg.Exclude...), excludeFlags...))
+	excludeList := append(append([]string{}, cfg.Exclude...), rr.Config.Exclude...)
+	excludeList = append(excludeList, excludeFlags...)
+	localExclude, err := manifest.ParsePrefixes(excludeList)
 	if err != nil {
 		return nil, fmt.Errorf("exclude: %w", err)
 	}

@@ -80,13 +80,20 @@ interactively once and may ask for your password.
 | `tj connect <remote> [--user <user>] [--dns none\|split\|all] [--network <cidr>]... [--exclude <cidr>]... [--no-discovery] [--replace]` | Start a session into the remote's network. |
 | `tj disconnect` | End the active session. Not an error when none is active. |
 | `tj status [--json]` | Print the active session: the remote, the DNS mode, the networks, and the uptime. |
+| `tj remote list\|show\|add\|set\|rm` | Manage the config aliases for remotes. |
+| `tj config path\|get\|set` | Read and write the defaults and the global exclude list. |
 | `tj version` | Print the tj version. |
 
 `<remote>` is a hostname, a tag such as `tag:example`, or an alias from the
 local config. The SSH user defaults to your local username; pass `--user`
 (for example `--user root`) or set `defaults.user` in the config for a
 gateway that requires a specific user. `list`, `describe`, `status`, and `doctor` also accept
-`--json`. `-v` on any command enables debug logging.
+`--json`. `-v` on any command enables debug logging. On the client-side
+commands, `tj describe -v`, `tj doctor -v`, `tj list --probe -v`, and the
+client half of `tj connect -v` now report peer resolution, the SSH dial,
+discovery, and the computed session networks on stderr. The session runs in
+its own systemd unit, so its logs go to the journal: `journalctl -u
+tj-session`.
 
 `tj connect` exits 3, and names the active session, when one is already
 running; use `--replace` to end it first. Every other error exits 1, and a
@@ -112,6 +119,43 @@ Networks:    10.0.0.0/16, 2001:db8::/56, 10.1.0.2/32
 
 $ tj disconnect
 ```
+
+## Managing config
+
+`tj` reads `$XDG_CONFIG_HOME/tj/config.yaml`. It holds the SSH user and DNS
+defaults, a global exclude list, and named remotes. The file is optional; a
+hostname or a tag works without it.
+
+`tj config` reads and writes the defaults and the global exclude list. `tj
+config path` prints the resolved file path.
+
+```
+$ tj config set defaults.user root
+$ tj config set defaults.dns split
+$ tj config get
+defaults.user:  root
+defaults.dns:   split
+exclude:        -
+```
+
+`tj remote` manages the named remotes. A remote binds an alias to a host and
+optional per-remote overrides: the SSH user, the DNS mode, extra networks to
+route, and networks to exclude. `--network` and `--exclude` repeat.
+
+```
+$ tj remote add evil8 --host gw.example --user root --dns split \
+    --network 10.0.0.0/8 --exclude 10.1.0.0/24
+$ tj remote list
+ALIAS  HOST        USER  DNS    NETWORKS    EXCLUDE
+evil8  gw.example  root  split  10.0.0.0/8  10.1.0.0/24
+$ tj remote set evil8 --dns all
+$ tj remote rm evil8
+```
+
+`add` fails when the alias already exists. `set` fails when it does not, and
+it changes only the fields whose flags you pass. `tj connect evil8` then adds
+the per-remote networks to the routed set and drops the per-remote excludes,
+on top of the manifest, discovery, and any `--network` or `--exclude` flag.
 
 ## The manifest
 
