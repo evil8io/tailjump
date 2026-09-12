@@ -68,8 +68,11 @@ not. A bound socket never sends through `tj0`, so the marked case is the only
 one where a session route can capture the transport, and the table covers it.
 On macOS tailscaled binds by interface, so the routes stay in the main table.
 
-The session also polls the local API every 30 s and logs one warning when
-tailscaled's current endpoint for the remote is inside the session networks.
+The session also samples tailscaled's endpoint for the remote every 10 s and
+logs one warning when the path changes three or more times within two
+minutes. The first version of the watch warned on an endpoint inside the
+session networks, and that fired on the shared gateway's real direct IPv6
+endpoint, which is inside the routed /56 and is not a loop.
 
 ## What the rig cannot see
 

@@ -184,7 +184,7 @@ func Run(ctx context.Context, planPath string) (err error) {
 		slog.Warn("write up state", "error", err)
 	}
 	slog.Info("session up", "remote", plan.Remote, "networks", len(plan.Networks), "dns", plan.DNS.Mode, "transport", state.Transport)
-	stopWatch := watchTransportPath(ctx, addr, routes)
+	stopWatch := watchTransportPath(ctx, addr)
 
 	select {
 	case <-ctx.Done():
