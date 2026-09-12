@@ -18,7 +18,10 @@ import (
 // DefaultSocket is the tailscaled local API socket path on Linux.
 const DefaultSocket = "/var/run/tailscale/tailscaled.sock"
 
-const statusURL = "http://local-tailscaled.sock/localapi/v0/status"
+const (
+	statusURL = "http://local-tailscaled.sock/localapi/v0/status"
+	pingURL   = "http://local-tailscaled.sock/localapi/v0/ping"
+)
 
 // Peer is one tailnet node from the local API status.
 type Peer struct {
@@ -26,6 +29,13 @@ type Peer struct {
 	Tags         []string
 	Online       bool
 	TailscaleIPs []netip.Addr
+
+	// Active reports recent traffic with the peer. CurAddr is the direct
+	// endpoint in use, empty when the traffic goes through DERP. Relay is
+	// the peer's home DERP region, set for every peer, active or not.
+	Active  bool
+	CurAddr string
+	Relay   string
 
 	// LastHandshake is the last successful WireGuard handshake. Resolve uses
 	// it only to break a tie between two online peers whose hostnames
@@ -79,6 +89,9 @@ type rawPeer struct {
 	HostName      string
 	Tags          []string
 	Online        bool
+	Active        bool
+	CurAddr       string
+	Relay         string
 	TailscaleIPs  []string
 	LastHandshake time.Time
 }
@@ -143,6 +156,9 @@ func (rp rawPeer) toPeer() (Peer, error) {
 		HostName:      rp.HostName,
 		Tags:          rp.Tags,
 		Online:        rp.Online,
+		Active:        rp.Active,
+		CurAddr:       rp.CurAddr,
+		Relay:         rp.Relay,
 		TailscaleIPs:  addrs,
 		LastHandshake: rp.LastHandshake,
 	}, nil
@@ -161,4 +177,59 @@ func (p Peer) IPv4() (netip.Addr, error) {
 // IsTagRef reports whether ref names a tag, for example "tag:example".
 func IsTagRef(ref string) bool {
 	return strings.HasPrefix(ref, "tag:")
+}
+
+// PingResult is the answer of one disco ping to a peer: the direct endpoint
+// when the path is direct, or the DERP region code when it is relayed.
+type PingResult struct {
+	Endpoint       string
+	DERPRegionCode string
+	Latency        time.Duration
+}
+
+// Direct reports whether the pong came over a direct path.
+func (r PingResult) Direct() bool {
+	return r.Endpoint != ""
+}
+
+type rawPing struct {
+	Endpoint       string
+	DERPRegionCode string
+	LatencySeconds float64
+	Err            string
+}
+
+// Ping sends one disco ping to the peer address through the local API and
+// returns the path the pong took. The first pong to a peer with a direct
+// path can still arrive over DERP, so a caller that needs the settled path
+// repeats the ping.
+func (c *Client) Ping(ctx context.Context, addr netip.Addr) (PingResult, error) {
+	url := pingURL + "?type=disco&ip=" + addr.String()
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, nil)
+	if err != nil {
+		return PingResult{}, err
+	}
+	req.Header.Set("Sec-Tailscale", "localapi")
+
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return PingResult{}, fmt.Errorf("dial tailscaled local API at %s: %w", c.socket, err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		return PingResult{}, fmt.Errorf("tailscaled local API returned %s", resp.Status)
+	}
+	var raw rawPing
+	if err := json.NewDecoder(resp.Body).Decode(&raw); err != nil {
+		return PingResult{}, fmt.Errorf("decode tailscaled local API ping: %w", err)
+	}
+	if raw.Err != "" {
+		return PingResult{}, fmt.Errorf("ping %s: %s", addr, raw.Err)
+	}
+	return PingResult{
+		Endpoint:       raw.Endpoint,
+		DERPRegionCode: raw.DERPRegionCode,
+		Latency:        time.Duration(raw.LatencySeconds * float64(time.Second)),
+	}, nil
 }
