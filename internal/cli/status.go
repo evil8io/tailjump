@@ -84,10 +84,14 @@ func transportLine(st *session.State) string {
 	case session.TransportQUIC:
 		return fmt.Sprintf("quic (port %d)", st.QUICPort)
 	case session.TransportSSH:
+		line := "ssh"
 		if st.Fallback != "" {
-			return "ssh (fallback: " + st.Fallback + ")"
+			line += " (fallback: " + st.Fallback + ")"
 		}
-		return "ssh"
+		if st.Lanes != "" {
+			line += ", lanes " + st.Lanes
+		}
+		return line
 	default:
 		return "unknown"
 	}

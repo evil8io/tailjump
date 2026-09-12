@@ -166,6 +166,10 @@ func buildPlan(client *sshc.Client, rr *resolvedRemote, cfg *config.Config, ref 
 	if err != nil {
 		return nil, err
 	}
+	singleLane, err := singleLaneKnob()
+	if err != nil {
+		return nil, err
+	}
 	slog.Debug("session networks", "count", len(networks), "networks", prefixStrings(networks), "dns", mode, "transport", tmode, "protocols", set)
 
 	return &session.Plan{
@@ -181,6 +185,7 @@ func buildPlan(client *sshc.Client, rr *resolvedRemote, cfg *config.Config, ref 
 		BandwidthDown: down,
 		Controller:    controller,
 		Protocols:     set.String(),
+		SingleLane:    singleLane,
 	}, nil
 }
 
@@ -203,6 +208,22 @@ func controllerKnob() (string, error) {
 		return v, nil
 	default:
 		return "", fmt.Errorf("invalid TJ_QUIC_CONTROLLER %q, want cubic or unset", v)
+	}
+}
+
+// singleLaneKnob reads the measurement knob TJ_SSH_LANES. Only 1 is valid;
+// it keeps the SSH transport on the primary lane alone, so a run compares
+// with and without the lanes. The session runs as root in a transient unit
+// and does not inherit this environment, so the plan carries the value. See
+// docs/architecture.md, "Testing".
+func singleLaneKnob() (bool, error) {
+	switch v := os.Getenv("TJ_SSH_LANES"); v {
+	case "":
+		return false, nil
+	case "1":
+		return true, nil
+	default:
+		return false, fmt.Errorf("invalid TJ_SSH_LANES %q, want 1 or unset", v)
 	}
 }
 

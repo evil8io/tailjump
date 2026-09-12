@@ -131,15 +131,16 @@ func Run(ctx context.Context, planPath string) (err error) {
 	}
 	defer func() { _ = sshClient.Close() }()
 
-	muxClient, err := startHelper(sshClient, plan.HelperArch)
+	muxClient, helperPath, err := startHelper(sshClient, plan.HelperArch)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = muxClient.Close() }()
 	slog.Debug("mux up", "helper", muxClient.Info().Hostname, "version", muxClient.Info().Version)
 
-	var dialer mux.Dialer = muxClient
+	var dialer mux.Dialer
 	var quicWait <-chan struct{}
+	var lanes *laneSet
 	quicClient, err := selectTransport(ctx, muxClient, addr, plan, state)
 	if err != nil {
 		return err
@@ -148,6 +149,16 @@ func Run(ctx context.Context, planPath string) (err error) {
 		defer func() { _ = quicClient.Close() }()
 		dialer = quicClient
 		quicWait = quicClient.Wait()
+		unlinkHelper(muxClient)
+	} else {
+		lanes, err = openLaneSet(ctx, muxClient, addr, plan, set, plat.Paths.CacheDir(), helperPath)
+		if err != nil {
+			return err
+		}
+		defer lanes.stop()
+		unlinkHelper(muxClient)
+		dialer = lanes.dialer
+		state.Lanes = lanes.names
 	}
 
 	dev, name, err := plat.Device.Create(deviceName, deviceMTU)
@@ -196,6 +207,8 @@ func Run(ctx context.Context, planPath string) (err error) {
 		slog.Info("session stopping on signal")
 	case <-muxClient.Wait():
 		slog.Warn("session ended: mux closed")
+	case name := <-lanes.closed():
+		slog.Warn("session ended: lane mux closed", "lane", name)
 	case <-quicWait:
 		slog.Warn("session ended: quic connection closed")
 	}
@@ -212,6 +225,7 @@ func Run(ctx context.Context, planPath string) (err error) {
 	if err := muxClient.Quit(); err != nil {
 		slog.Debug("quit helper", "error", err)
 	}
+	lanes.stop()
 	_ = dp.Close()
 	dp.Wait()
 	teardownDevice(plat, nil, name)
@@ -300,18 +314,29 @@ func cleanup(plat platform.Platform) error {
 }
 
 // startHelper uploads the helper for the remote's architecture, starts it,
-// and opens the mux over its stdin and stdout.
-func startHelper(client *sshc.Client, arch string) (*mux.Client, error) {
+// opens the mux over its stdin and stdout, and returns the uploaded path. The
+// extra lanes start their own helper from that same file.
+func startHelper(client *sshc.Client, arch string) (*mux.Client, string, error) {
 	helperBytes, err := embed.Helper(arch)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	helperPath, err := uploadHelper(client, helperBytes)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	slog.Debug("helper uploaded", "path", helperPath, "arch", arch)
 
+	muxClient, err := execHelper(client, helperPath)
+	if err != nil {
+		return nil, "", err
+	}
+	return muxClient, helperPath, nil
+}
+
+// execHelper runs the uploaded helper on the connection and opens the mux
+// over its stdin and stdout.
+func execHelper(client *sshc.Client, helperPath string) (*mux.Client, error) {
 	channel, err := client.Exec("exec " + helperPath)
 	if err != nil {
 		return nil, fmt.Errorf("start helper: %w", err)
@@ -322,6 +347,15 @@ func startHelper(client *sshc.Client, arch string) (*mux.Client, error) {
 		return nil, fmt.Errorf("open mux: %w", err)
 	}
 	return muxClient, nil
+}
+
+// unlinkHelper asks the helper to remove its own file. Every lane has started
+// its helper by then, and Linux keeps a running binary alive without its
+// file, so nothing needs the file after this point.
+func unlinkHelper(muxClient *mux.Client) {
+	if err := muxClient.Unlink(); err != nil {
+		slog.Warn("unlink the helper file", "error", err)
+	}
 }
 
 func uploadHelper(client *sshc.Client, body []byte) (string, error) {

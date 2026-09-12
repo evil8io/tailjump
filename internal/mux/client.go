@@ -85,6 +85,16 @@ func (c *Client) Quit() error {
 	return nil
 }
 
+// Unlink asks the helper to remove its own binary from the remote. The
+// helper processes control verbs in order and sends no reply, so there is
+// nothing to read. The client sends it once the file has served every lane.
+func (c *Client) Unlink() error {
+	if _, err := c.ctl.Write([]byte(verbUnlink + "\n")); err != nil && !sessionGone(err) {
+		return err
+	}
+	return nil
+}
+
 // NegotiateQUIC asks the helper to start its QUIC listener and returns the
 // port and the helper's certificate fingerprint. A helper that cannot listen
 // answers with an *UnavailableError.
