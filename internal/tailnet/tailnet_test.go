@@ -4,6 +4,7 @@ import (
 	"context"
 	"net"
 	"net/http"
+	"net/netip"
 	"path/filepath"
 	"testing"
 	"time"
@@ -24,6 +25,21 @@ func startFakeLocalAPI(t *testing.T, body string) string {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(body))
+	})
+	mux.HandleFunc("/localapi/v0/ping", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.Header.Get("Sec-Tailscale") != "localapi" {
+			http.Error(w, "bad ping request", http.StatusForbidden)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Query().Get("ip") {
+		case "100.64.0.2":
+			_, _ = w.Write([]byte(`{"Endpoint":"[2001:db8::2]:41641","DERPRegionCode":"","LatencySeconds":0.029}`))
+		case "100.64.0.3":
+			_, _ = w.Write([]byte(`{"Endpoint":"","DERPRegionCode":"lhr","LatencySeconds":0.027}`))
+		default:
+			_, _ = w.Write([]byte(`{"Err":"no such peer"}`))
+		}
 	})
 	srv := &http.Server{Handler: mux}
 	go func() { _ = srv.Serve(ln) }()
@@ -111,4 +127,70 @@ func TestStatusRejectsBadAddress(t *testing.T) {
 	if _, err := c.Status(ctx); err == nil {
 		t.Fatal("want error for an invalid tailscale address")
 	}
+}
+
+func TestStatusPathFields(t *testing.T) {
+	sock := startFakeLocalAPI(t, `{
+		"Self": {"HostName":"client","Online":true,"TailscaleIPs":["100.64.0.1"]},
+		"Peer": {
+			"nodekey:a": {"HostName":"direct","Online":true,"Active":true,"CurAddr":"[2001:db8::2]:41641","Relay":"lhr","TailscaleIPs":["100.64.0.2"]},
+			"nodekey:b": {"HostName":"relayed","Online":true,"Active":true,"CurAddr":"","Relay":"lhr","TailscaleIPs":["100.64.0.3"]},
+			"nodekey:c": {"HostName":"idle","Online":true,"Active":false,"CurAddr":"","Relay":"lhr","TailscaleIPs":["100.64.0.4"]}
+		}
+	}`)
+	st, err := New(sock).Status(context.Background())
+	if err != nil {
+		t.Fatalf("Status: %v", err)
+	}
+	for _, p := range st.Peers {
+		switch p.HostName {
+		case "direct":
+			if !p.Active || p.CurAddr != "[2001:db8::2]:41641" || p.Relay != "lhr" {
+				t.Errorf("direct peer: %+v", p)
+			}
+		case "relayed":
+			if !p.Active || p.CurAddr != "" || p.Relay != "lhr" {
+				t.Errorf("relayed peer: %+v", p)
+			}
+		case "idle":
+			if p.Active || p.CurAddr != "" || p.Relay != "lhr" {
+				t.Errorf("idle peer: %+v", p)
+			}
+		}
+	}
+}
+
+func TestPing(t *testing.T) {
+	sock := startFakeLocalAPI(t, `{"Self":{"HostName":"client","Online":true,"TailscaleIPs":["100.64.0.1"]},"Peer":{}}`)
+	c := New(sock)
+	ctx := context.Background()
+
+	r, err := c.Ping(ctx, mustAddr(t, "100.64.0.2"))
+	if err != nil {
+		t.Fatalf("Ping direct: %v", err)
+	}
+	if !r.Direct() || r.Endpoint != "[2001:db8::2]:41641" || r.Latency != 29*time.Millisecond {
+		t.Errorf("direct result: %+v", r)
+	}
+
+	r, err = c.Ping(ctx, mustAddr(t, "100.64.0.3"))
+	if err != nil {
+		t.Fatalf("Ping relayed: %v", err)
+	}
+	if r.Direct() || r.DERPRegionCode != "lhr" || r.Latency != 27*time.Millisecond {
+		t.Errorf("relayed result: %+v", r)
+	}
+
+	if _, err := c.Ping(ctx, mustAddr(t, "100.64.0.9")); err == nil {
+		t.Error("Ping to an unknown peer returned no error")
+	}
+}
+
+func mustAddr(t *testing.T, s string) netip.Addr {
+	t.Helper()
+	a, err := netip.ParseAddr(s)
+	if err != nil {
+		t.Fatalf("parse %q: %v", s, err)
+	}
+	return a
 }

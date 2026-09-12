@@ -74,7 +74,7 @@ interactively once and may ask for your password.
 | Command | Does |
 | -- | -- |
 | `tj setup` | Install the sudoers rule and the root copy; check the required tools. |
-| `tj list [--tag <tag>] [--probe] [--user <user>]` | List the online tailnet peers. `--probe` opens SSH to each and marks the ones with a manifest. |
+| `tj list [--tag <tag>] [--path] [--probe] [--user <user>]` | List the online tailnet peers, with the active session's status on its peer and the Tailscale path: `direct`, `relay <region>`, or `idle` for a peer without recent traffic, as `tailscale status` reports it. `--path` pings each idle peer to settle its path. `--probe` opens SSH to each and marks the ones with a manifest. |
 | `tj describe <remote> [--user <user>] [--no-discovery]` | Print the merged manifest, discovery result, and computed session networks for a remote, without starting a session. |
 | `tj doctor <remote> [--user <user>]` | Report readiness facts for a remote: peer online, SSH ok, manifest present, discovery ok, the computed session networks, DNS mode availability, and whether the QUIC transport comes up. |
 | `tj connect <remote> [--user <user>] [--dns none\|split\|all] [--transport auto\|quic\|ssh] [--network <cidr>]... [--exclude <cidr>]... [--no-discovery] [--replace]` | Start a session into the remote's network. |

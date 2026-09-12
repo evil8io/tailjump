@@ -14,24 +14,34 @@ import (
 	"github.com/evil8io/tailjump/internal/platform"
 )
 
-// Status prints the active session. It cross-checks the unit, so a stale
-// state file from a crash does not report a session that is gone. It reads
-// the state file without root.
-func Status(w io.Writer, asJSON bool) error {
+// Active returns the state of the active session, or nil when none is
+// active. It cross-checks the unit, so a stale state file from a crash does
+// not report a session that is gone. It reads the state file without root.
+func Active() (*State, error) {
 	plat := platform.New()
-	statePath := StatePath(plat.Paths.RuntimeDir())
-
-	st, err := ReadState(statePath)
+	st, err := ReadState(StatePath(plat.Paths.RuntimeDir()))
 	if errors.Is(err, os.ErrNotExist) {
-		return printNoSession(w, asJSON)
+		return nil, nil
 	}
 	if err != nil {
-		return err
+		return nil, err
 	}
 	switch active, aerr := plat.Runner.Active(); {
 	case aerr != nil:
 		slog.Warn("check session active", "error", aerr)
 	case !active:
+		return nil, nil
+	}
+	return st, nil
+}
+
+// Status prints the active session.
+func Status(w io.Writer, asJSON bool) error {
+	st, err := Active()
+	if err != nil {
+		return err
+	}
+	if st == nil {
 		return printNoSession(w, asJSON)
 	}
 
