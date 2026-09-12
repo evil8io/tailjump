@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.3.1](https://github.com/evil8io/tailjump/compare/v1.3.0...v1.3.1) (2026-09-12)
+
+
+### Bug Fixes
+
+* **session:** keep the session routes out of the main table ([#20](https://github.com/evil8io/tailjump/issues/20)) ([de064a6](https://github.com/evil8io/tailjump/commit/de064a6222c2fc51ee69b273d42fde4b0a9963f0))
+
 ## [1.3.0](https://github.com/evil8io/tailjump/compare/v1.2.0...v1.3.0) (2026-09-12)
 
 
