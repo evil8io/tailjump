@@ -18,10 +18,11 @@ import (
 
 func newDescribeCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "describe <remote>",
-		Short: "Print the merged config for a remote without a session",
-		Args:  cobra.ExactArgs(1),
-		RunE:  runDescribe,
+		Use:     "describe <remote>",
+		Aliases: []string{"desc"},
+		Short:   "Print the merged config for a remote without a session",
+		Args:    cobra.ExactArgs(1),
+		RunE:    runDescribe,
 	}
 	cmd.Flags().String("user", "", "the SSH user")
 	cmd.Flags().Bool("no-discovery", false, "skip discovery")

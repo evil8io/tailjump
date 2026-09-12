@@ -80,9 +80,13 @@ interactively once and may ask for your password.
 | `tj connect <remote> [--user <user>] [--dns none\|split\|all] [--transport auto\|quic\|ssh] [--network <cidr>]... [--exclude <cidr>]... [--no-discovery] [--replace]` | Start a session into the remote's network. |
 | `tj disconnect` | End the active session. Not an error when none is active. |
 | `tj status [--json]` | Print the active session: the remote, the transport, the DNS mode, the networks, and the uptime. |
-| `tj remote list\|show\|add\|set\|rm` | Manage the config aliases for remotes. |
+| `tj remote list\|show\|add\|set\|remove` | Manage the config aliases for remotes. |
 | `tj config path\|get\|set` | Read and write the defaults and the global exclude list. |
 | `tj version` | Print the tj version. |
+
+Aliases: `ls` for `list`, `up` for `connect`, `down` for `disconnect`, `st` for
+`status`, `desc` for `describe`, `remote ls` for `remote list`, and `remote rm`
+for `remote remove`.
 
 `<remote>` is a hostname, a tag such as `tag:example`, or an alias from the
 local config. The SSH user defaults to your local username; pass `--user`
@@ -152,7 +156,7 @@ $ tj remote list
 ALIAS  HOST        USER  DNS    NETWORKS    EXCLUDE
 evil8  gw.example  root  split  10.0.0.0/8  10.1.0.0/24
 $ tj remote set evil8 --dns all
-$ tj remote rm evil8
+$ tj remote remove evil8
 ```
 
 `add` fails when the alias already exists. `set` fails when it does not, and

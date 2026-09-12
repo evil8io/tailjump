@@ -35,9 +35,10 @@ func newRemoteConfigCmd() *cobra.Command {
 
 func newRemoteListCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "list",
-		Short: "List the config aliases",
-		Args:  cobra.NoArgs,
+		Use:     "list",
+		Aliases: []string{"ls"},
+		Short:   "List the config aliases",
+		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			asJSON, _ := cmd.Flags().GetBool("json")
 			cfg, err := config.Load(localConfigPath())
@@ -170,9 +171,10 @@ func newRemoteSetCmd() *cobra.Command {
 
 func newRemoteRmCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "rm <alias>",
-		Short: "Remove a config alias",
-		Args:  cobra.ExactArgs(1),
+		Use:     "remove <alias>",
+		Aliases: []string{"rm"},
+		Short:   "Remove a config alias",
+		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			alias := args[0]
 			path := localConfigPath()

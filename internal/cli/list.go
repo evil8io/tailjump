@@ -19,9 +19,10 @@ const probeTimeout = 5 * time.Second
 
 func newListCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "list",
-		Short: "List the online tailnet peers",
-		RunE:  runList,
+		Use:     "list",
+		Aliases: []string{"ls"},
+		Short:   "List the online tailnet peers",
+		RunE:    runList,
 	}
 	cmd.Flags().String("tag", "", "list only peers with this tag")
 	cmd.Flags().Bool("probe", false, "open SSH to each peer and mark the ones with a manifest")
