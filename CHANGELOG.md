@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.5.0](https://github.com/evil8io/tailjump/compare/v1.4.0...v1.5.0) (2026-09-12)
+
+
+### Features
+
+* **session:** open one ssh connection per protocol on the ssh transport ([#27](https://github.com/evil8io/tailjump/issues/27)) ([63a552f](https://github.com/evil8io/tailjump/commit/63a552f79717ee4cacc49ebb38c329513660ba45))
+
 ## [1.4.0](https://github.com/evil8io/tailjump/compare/v1.3.2...v1.4.0) (2026-09-12)
 
 
