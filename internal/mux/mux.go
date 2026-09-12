@@ -65,6 +65,22 @@ var (
 	ErrDialFailed  = errors.New("dial failed")
 )
 
+// Stream is one bidirectional flow of the mux transport. A yamux stream
+// satisfies it, and a QUIC stream will satisfy it too.
+type Stream interface {
+	io.Reader
+	io.Writer
+	io.Closer
+	SetReadDeadline(t time.Time) error
+}
+
+// Dialer opens TCP and UDP flows to the remote helper. The yamux Client
+// implements it.
+type Dialer interface {
+	DialTCP(dst netip.AddrPort) (net.Conn, error)
+	DialUDP(dst netip.AddrPort) (*UDPConn, error)
+}
+
 // ControlInfo is the JSON line the helper writes on the control stream.
 type ControlInfo struct {
 	Version  string `json:"version"`

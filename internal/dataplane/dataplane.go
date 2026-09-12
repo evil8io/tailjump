@@ -31,10 +31,10 @@ type DataPlane struct {
 	wg     sync.WaitGroup
 }
 
-// New builds the netstack for the device MTU and wires it to the mux client.
-// The device is the capture; the client is the remote side.
-func New(dev tun.Device, client *mux.Client, mtu int) (*DataPlane, error) {
-	ns, err := newNetStack(uint32(mtu), client)
+// New builds the netstack for the device MTU and wires it to the mux dialer.
+// The device is the capture; the dialer is the remote side.
+func New(dev tun.Device, dialer mux.Dialer, mtu int) (*DataPlane, error) {
+	ns, err := newNetStack(uint32(mtu), dialer)
 	if err != nil {
 		return nil, err
 	}

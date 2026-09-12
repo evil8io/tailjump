@@ -49,14 +49,14 @@ const (
 type netStack struct {
 	stk    *stack.Stack
 	ep     *channel.Endpoint
-	client *mux.Client
+	dialer mux.Dialer
 }
 
 // newNetStack builds the stack with the network and transport protocols, the
 // promiscuous spoofing NIC, the default routes, and the TCP and UDP
 // forwarders. It creates no device.
-func newNetStack(mtu uint32, client *mux.Client) (*netStack, error) {
-	return newNetStackWith(mtu, client, []stack.NetworkProtocolFactory{
+func newNetStack(mtu uint32, dialer mux.Dialer) (*netStack, error) {
+	return newNetStackWith(mtu, dialer, []stack.NetworkProtocolFactory{
 		ipv4.NewProtocol, ipv6.NewProtocol,
 	})
 }
@@ -64,7 +64,7 @@ func newNetStack(mtu uint32, client *mux.Client) (*netStack, error) {
 // newNetStackWith builds the netstack with the given network protocol
 // factories. The loopback test passes factories that accept martian loopback
 // destinations, which the production factories reject.
-func newNetStackWith(mtu uint32, client *mux.Client, netProtos []stack.NetworkProtocolFactory) (*netStack, error) {
+func newNetStackWith(mtu uint32, dialer mux.Dialer, netProtos []stack.NetworkProtocolFactory) (*netStack, error) {
 	stk := stack.New(stack.Options{
 		NetworkProtocols: netProtos,
 		TransportProtocols: []stack.TransportProtocolFactory{
@@ -89,7 +89,7 @@ func newNetStackWith(mtu uint32, client *mux.Client, netProtos []stack.NetworkPr
 		{Destination: header.IPv6EmptySubnet, NIC: nicID},
 	})
 
-	ns := &netStack{stk: stk, ep: ep, client: client}
+	ns := &netStack{stk: stk, ep: ep, dialer: dialer}
 
 	tcpFwd := tcp.NewForwarder(stk, 0, tcpForwarderMaxInFlight, ns.handleTCP)
 	stk.SetTransportProtocolHandler(tcp.ProtocolNumber, tcpFwd.HandlePacket)
@@ -112,7 +112,7 @@ func (ns *netStack) handleTCP(r *tcp.ForwarderRequest) {
 	id := r.ID()
 	dst := netip.AddrPortFrom(addrFrom(id.LocalAddress), id.LocalPort)
 	go func() {
-		stream, err := ns.client.DialTCP(dst)
+		stream, err := ns.dialer.DialTCP(dst)
 		if err != nil {
 			slog.Debug("tcp dial failed", "dst", dst, "error", err)
 			r.Complete(true)
@@ -171,7 +171,7 @@ func (ns *netStack) handleUDP(r *udp.ForwarderRequest) {
 
 func (ns *netStack) relayUDP(conn *gonet.UDPConn, dst netip.AddrPort) {
 	defer func() { _ = conn.Close() }()
-	flow, err := ns.client.DialUDP(dst)
+	flow, err := ns.dialer.DialUDP(dst)
 	if err != nil {
 		slog.Debug("udp dial failed", "dst", dst, "error", err)
 		return

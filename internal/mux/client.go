@@ -21,6 +21,8 @@ type Client struct {
 	info ControlInfo
 }
 
+var _ Dialer = (*Client)(nil)
+
 // NewClient reads the handshake, starts yamux over the transport, opens the
 // control stream, and reads the helper's info line. It wraps the transport in
 // one bufio.Reader for both the handshake and the yamux session, so no byte
@@ -119,7 +121,7 @@ func (c *Client) DialTCP(dst netip.AddrPort) (net.Conn, error) {
 
 // UDPConn is a UDP flow over one stream. Frames carry one datagram each.
 type UDPConn struct {
-	stream *yamux.Stream
+	stream Stream
 }
 
 // DialUDP opens a UDP stream to the destination. It does not wait for a status

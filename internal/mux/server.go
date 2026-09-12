@@ -68,7 +68,7 @@ func (s *Server) logf(format string, args ...any) {
 	}
 }
 
-func (s *Server) handle(stream *yamux.Stream, stop func()) {
+func (s *Server) handle(stream Stream, stop func()) {
 	var kind [1]byte
 	if _, err := io.ReadFull(stream, kind[:]); err != nil {
 		_ = stream.Close()
@@ -86,7 +86,7 @@ func (s *Server) handle(stream *yamux.Stream, stop func()) {
 	}
 }
 
-func (s *Server) handleControl(stream *yamux.Stream, stop func()) {
+func (s *Server) handleControl(stream Stream, stop func()) {
 	defer func() { _ = stream.Close() }()
 	if _, err := stream.Write(s.Info.encode()); err != nil {
 		return
@@ -103,7 +103,7 @@ func (s *Server) handleControl(stream *yamux.Stream, stop func()) {
 	}
 }
 
-func (s *Server) handleTCP(stream *yamux.Stream) {
+func (s *Server) handleTCP(stream Stream) {
 	defer func() { _ = stream.Close() }()
 	dst, err := readDest(stream)
 	if err != nil {
@@ -134,7 +134,7 @@ type closeWriter interface {
 	CloseWrite() error
 }
 
-func relayTCP(stream *yamux.Stream, conn net.Conn) {
+func relayTCP(stream Stream, conn net.Conn) {
 	var wg sync.WaitGroup
 	wg.Add(2)
 	go func() {
@@ -154,7 +154,7 @@ func relayTCP(stream *yamux.Stream, conn net.Conn) {
 	wg.Wait()
 }
 
-func (s *Server) handleUDP(stream *yamux.Stream) {
+func (s *Server) handleUDP(stream Stream) {
 	defer func() { _ = stream.Close() }()
 	dst, err := readDest(stream)
 	if err != nil {
@@ -187,7 +187,7 @@ func (s *Server) idleFor(dst netip.AddrPort) time.Duration {
 	return idleFor(dst.Port(), def, dns)
 }
 
-func relayUDP(stream *yamux.Stream, conn *net.UDPConn, idle time.Duration) {
+func relayUDP(stream Stream, conn *net.UDPConn, idle time.Duration) {
 	var closeOnce sync.Once
 	closeAll := func() {
 		closeOnce.Do(func() {
