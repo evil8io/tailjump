@@ -175,6 +175,11 @@ assert_clean() {
 	fi
 }
 
+# The host may run its own tj session; the guard at the end compares the
+# host's tj0 routes before and after the rig, so a live host session is not
+# a failure.
+host_tj0_before="$(ip route show 2>/dev/null | grep 'dev tj0' || true)"
+
 log "build tj (host arch) with the embedded helpers"
 (cd "$ROOT" && task build)
 
@@ -269,16 +274,14 @@ case "$journal" in
 *) bad "scenario B: the journal has no graceful shutdown log line" ;;
 esac
 
-log "confirm the host route table has no tj0 trace"
-host_routes="$(ip route show 2>/dev/null || true)"
-case "$host_routes" in
-*'dev tj0'*)
-	bad "the host routing table has a dev tj0 route; the rig must not affect the host"
-	;;
-*)
-	ok "the host routing table has no dev tj0 route"
-	;;
-esac
+log "confirm the rig left no tj0 route on the host"
+host_tj0_after="$(ip route show 2>/dev/null | grep 'dev tj0' || true)"
+if [ "$host_tj0_after" = "$host_tj0_before" ]; then
+	ok "the host's tj0 routes are unchanged by the rig"
+else
+	bad "the host's tj0 routes changed; the rig must not affect the host"
+	printf 'before:\n%s\nafter:\n%s\n' "$host_tj0_before" "$host_tj0_after"
+fi
 
 log "result: ${pass} passed, ${fail} failed"
 [ "$fail" -eq 0 ]
