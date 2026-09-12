@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.3.0](https://github.com/evil8io/tailjump/compare/v1.2.0...v1.3.0) (2026-09-12)
+
+
+### Features
+
+* **cli:** add command aliases and rename remote rm to remove ([#15](https://github.com/evil8io/tailjump/issues/15)) ([c091fae](https://github.com/evil8io/tailjump/commit/c091fae2593359470c5691bb124fef639b5a6ab8))
+* **cli:** show the session status and the tailscale path in list ([#16](https://github.com/evil8io/tailjump/issues/16)) ([147aa28](https://github.com/evil8io/tailjump/commit/147aa2875945e9b6895361fb759c0b82e568c6ee))
+* **transport:** add the QUIC data plane over the tailnet ([#10](https://github.com/evil8io/tailjump/issues/10)) ([0fad289](https://github.com/evil8io/tailjump/commit/0fad28918ec0812d9d8848642778fc3881c25800))
+
 ## [1.2.0](https://github.com/evil8io/tailjump/compare/v1.1.0...v1.2.0) (2026-09-11)
 
 
