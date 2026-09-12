@@ -4,12 +4,15 @@
 package helper
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/evil8io/tailjump/internal/mux"
@@ -35,8 +38,12 @@ func Main() {
 }
 
 // Run serves the mux over the given transport. The reader and the writer are
-// the mux transport, and logw is the helper log.
+// the mux transport, and logw is the helper log. It ignores SIGPIPE, because
+// the Go runtime otherwise ends the process on a write to a closed stdout
+// without the deferred remove of the helper file; with the signal ignored the
+// write fails, the mux closes, and the exit path runs.
 func Run(stdin io.Reader, stdout io.Writer, logw io.Writer) error {
+	signal.Ignore(syscall.SIGPIPE)
 	var self string
 	if len(os.Args) > 0 {
 		self = os.Args[0]
@@ -52,7 +59,7 @@ func Run(stdin io.Reader, stdout io.Writer, logw io.Writer) error {
 func run(self string, stdin io.Reader, stdout io.Writer, logw io.Writer) error {
 	sweepStale(self, time.Now())
 	defer cleanupCache()
-	defer removeSelf(self)
+	defer func() { _ = removeSelf(self) }()
 
 	hostname, _ := os.Hostname()
 	srv := &mux.Server{
@@ -64,7 +71,7 @@ func run(self string, stdin io.Reader, stdout io.Writer, logw io.Writer) error {
 			PID:      os.Getpid(),
 		},
 		LogW:   logw,
-		Unlink: func() { removeSelf(self) },
+		Unlink: func() error { return removeSelf(self) },
 	}
 	return srv.Serve(transport{r: stdin, w: stdout})
 }
@@ -83,11 +90,15 @@ func ArchForUname(unameM string) (string, error) {
 }
 
 // removeSelf removes the helper's own file. The unlink verb and the exit both
-// call it, and the second call finds the file gone.
-func removeSelf(self string) {
-	if self != "" {
-		_ = os.Remove(self)
+// call it, and the second call finds the file gone, which is not an error.
+func removeSelf(self string) error {
+	if self == "" {
+		return nil
 	}
+	if err := os.Remove(self); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	return nil
 }
 
 // sweepStale removes every helper file in self's directory that is older than

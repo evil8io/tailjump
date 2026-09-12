@@ -83,3 +83,16 @@ func TestParseQUICReplyUnavailable(t *testing.T) {
 		}
 	}
 }
+
+func TestUnlinkReply(t *testing.T) {
+	if err := parseUnlinkReply(string(encodeUnlinkReply(unlinkOK))); err != nil {
+		t.Fatalf("ok reply parsed as %v", err)
+	}
+	err := parseUnlinkReply(string(encodeUnlinkReply("remove /tmp/x: permission denied")))
+	if err == nil || err.Error() != "remove /tmp/x: permission denied" {
+		t.Fatalf("error reply = %v, want the helper's reason", err)
+	}
+	if err := parseUnlinkReply("quic 7443 sha256:00"); err == nil {
+		t.Fatal("a foreign line parsed as an unlink reply")
+	}
+}

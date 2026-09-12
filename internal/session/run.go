@@ -349,12 +349,14 @@ func execHelper(client *sshc.Client, helperPath string) (*mux.Client, error) {
 	return muxClient, nil
 }
 
-// unlinkHelper asks the helper to remove its own file. Every lane has started
-// its helper by then, and Linux keeps a running binary alive without its
-// file, so nothing needs the file after this point.
+// unlinkHelper asks the helper to remove its own file and waits for the
+// answer. Every lane has started its helper by then, and Linux keeps a
+// running binary alive without its file, so nothing needs the file after
+// this point. A failure is a warning: the helper removes the file at its
+// exit, and the next helper sweeps a stale file.
 func unlinkHelper(muxClient *mux.Client) {
 	if err := muxClient.Unlink(); err != nil {
-		slog.Warn("unlink the helper file", "error", err)
+		slog.Warn("the helper did not remove its file", "error", err)
 	}
 }
 

@@ -68,6 +68,26 @@ func (r QUICReply) encode() []byte {
 	return fmt.Appendf(nil, "%s %d %s\n", verbQUIC, r.Port, r.Fingerprint)
 }
 
+// unlinkOK is the helper's answer when the remove succeeded.
+const unlinkOK = "ok"
+
+func encodeUnlinkReply(result string) []byte {
+	return fmt.Appendf(nil, "%s %s\n", verbUnlink, strings.ReplaceAll(result, "\n", " "))
+}
+
+// parseUnlinkReply returns nil for an ok answer and the helper's reason
+// otherwise.
+func parseUnlinkReply(line string) error {
+	verb, rest, _ := strings.Cut(strings.TrimSpace(line), " ")
+	if verb != verbUnlink {
+		return fmt.Errorf("unlink reply: unexpected line %q", line)
+	}
+	if rest = strings.TrimSpace(rest); rest != unlinkOK {
+		return errors.New(rest)
+	}
+	return nil
+}
+
 func encodeUnavailable(reason string) []byte {
 	return fmt.Appendf(nil, "%s %s\n", verbUnavailable, strings.ReplaceAll(reason, "\n", " "))
 }
