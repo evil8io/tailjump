@@ -67,6 +67,8 @@ const (
 	quicPacketSize       = 1232
 	quicMaxStreams       = 1 << 16
 	quicOpenTimeout      = 10 * time.Second
+	quicStreamWindow     = 8 << 20
+	quicConnWindow       = 20 << 20
 )
 
 // Control stream verbs.

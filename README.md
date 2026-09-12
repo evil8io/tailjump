@@ -183,8 +183,8 @@ and cloud metadata alone.
   UDP rule per remote for the QUIC port range, for example
   `{"src": ["group:example"], "dst": ["tag:example"], "ip": ["udp:7443-7452"]}`.
   Without the UDP rule a session works on the SSH transport and says so. A
-  tag is optional and only filters `list`. See contract C5 and "The
-  transport".
+  tag is optional and only filters `list`. See `docs/spec.md`, contract C5,
+  and "The transport".
 
 ## The transport
 
@@ -235,6 +235,8 @@ from inside it against a real gateway. Set the real gateway in
 `test/e2e/target.env` (git-ignored; see `test/e2e/target.env.example`), then
 run `test/e2e/run.sh` for the reachability, DNS, transport, and fallback
 tests, or `test/e2e/crash.sh` for the interrupted-session cleanup test.
+`test/e2e/loss.sh` measures a session on each transport under `tc netem`
+loss and delay inside the rig; its numbers are in `docs/spikes/06-loss-test.md`.
 
 ## Docs
 
