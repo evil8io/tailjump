@@ -16,6 +16,11 @@
 # through a session and proves a Time Exceeded from a hop on the way. It
 # ends with the echo socket line of tj doctor.
 #
+# On the ssh transport it checks the lane count in the Transport line and the
+# helper process count on the remote, for the full protocol set, for the
+# tcp-only set, and for the dns-enabled fallback session, and it checks that
+# the remote cache directory stays empty while a session is up.
+#
 # It never runs tj connect on the host: the host holds its own session and the
 # one-session rule forbids a second. The rig reaches the tailnet through the
 # host's tailscaled socket.
@@ -69,6 +74,19 @@ status_transport() {
 # port range, one per line, as "address:port".
 remote_quic_listeners() {
 	ssh "${SSH_OPTS[@]}" "root@$1" 'ss -Hlun' 2>/dev/null | awk '{print $4}' | grep -E ":${QUIC_PORT_RE}\$" || true
+}
+
+# remote_helper_count prints the number of tj-helper processes on a remote.
+# The bracket in the pattern keeps the ssh command's own process from
+# matching itself.
+remote_helper_count() {
+	ssh "${SSH_OPTS[@]}" "root@$1" "pgrep -fc '[t]j-helper\.'" 2>/dev/null || true
+}
+
+# remote_cache_listing prints the remote's tj cache directory. Empty output
+# means clean.
+remote_cache_listing() {
+	ssh "${SSH_OPTS[@]}" "root@$1" 'ls -A "$HOME/.cache/tj" 2>/dev/null' || true
 }
 
 # connect_seconds runs tj connect with the given arguments and prints the
@@ -187,6 +205,20 @@ if rig tj status | tee >(cat >&2) | grep -q "Status:.*up"; then
 	ok "status shows the session up"
 else
 	bad "status does not show the session up"
+fi
+
+log "remote: the cache directory and the helper process count while the quic session is up"
+CACHE="$(remote_cache_listing "$TJ_TEST_REMOTE")"
+if [ -z "$CACHE" ]; then
+	ok "the remote cache directory is empty while the session is up"
+else
+	bad "the remote cache directory has entries while the session is up: ${CACHE}"
+fi
+HELPERS="$(remote_helper_count "$TJ_TEST_REMOTE")"
+if [ "$HELPERS" -eq 1 ]; then
+	ok "the remote has 1 helper process on the quic transport"
+else
+	bad "the remote has ${HELPERS} helper processes, want 1"
 fi
 
 log "session routes: the session table and the rules exist, and main has no tj0 route"
@@ -507,6 +539,29 @@ if [ -n "${TJ_TEST_TRACE_TARGET:-}" ]; then
 	sleep 2
 fi
 
+log "lanes: --protocols tcp --dns none --transport ssh gives a single helper lane"
+rig tj -v connect "$TJ_TEST_REF" --user "$TJ_TEST_USER" --dns none --protocols tcp --transport ssh
+TRANSPORT="$(status_transport)"
+if printf '%s' "$TRANSPORT" | grep -qE '^ssh, lanes tcp$'; then
+	ok "status shows transport ${TRANSPORT}"
+else
+	bad "status shows transport '${TRANSPORT}', want ssh with lanes tcp"
+fi
+HELPERS="$(remote_helper_count "$TJ_TEST_REMOTE")"
+if [ "$HELPERS" -eq 1 ]; then
+	ok "the remote has 1 helper process for the tcp-only lane"
+else
+	bad "the remote has ${HELPERS} helper processes, want 1"
+fi
+rig tj disconnect
+sleep 2
+HELPERS="$(remote_helper_count "$TJ_TEST_REMOTE")"
+if [ "$HELPERS" -eq 0 ]; then
+	ok "no helper process remains on the remote after the tcp-only lane disconnects"
+else
+	bad "${HELPERS} helper processes remain on the remote after the tcp-only lane disconnects"
+fi
+
 log "fallback: measure two connects on the ssh transport, the smaller one is the baseline"
 SSH_SECONDS=""
 for run in 1 2; do
@@ -514,10 +569,22 @@ for run in 1 2; do
 	printf 'connect --transport ssh run %s took %s s\n' "$run" "$seconds"
 	if [ "$run" -eq 1 ]; then
 		TRANSPORT="$(status_transport)"
-		if [ "$TRANSPORT" = "ssh" ]; then
-			ok "status shows transport ssh for --transport ssh"
+		if printf '%s' "$TRANSPORT" | grep -qE '^ssh, lanes tcp,udp,icmp$'; then
+			ok "status shows transport ${TRANSPORT}"
 		else
-			bad "status shows transport '${TRANSPORT}', want ssh"
+			bad "status shows transport '${TRANSPORT}', want ssh with lanes tcp,udp,icmp"
+		fi
+		HELPERS="$(remote_helper_count "$TJ_TEST_REMOTE")"
+		if [ "$HELPERS" -eq 3 ]; then
+			ok "the remote has 3 helper processes on the ssh transport"
+		else
+			bad "the remote has ${HELPERS} helper processes, want 3"
+		fi
+		CACHE="$(remote_cache_listing "$TJ_TEST_REMOTE")"
+		if [ -z "$CACHE" ]; then
+			ok "the remote cache directory is empty while the ssh session is up"
+		else
+			bad "the remote cache directory has entries while the ssh session is up: ${CACHE}"
 		fi
 	fi
 	rig tj disconnect
@@ -530,7 +597,8 @@ done
 log "fallback: block udp ${QUIC_PORTS} inside the rig, then connect with the auto transport"
 block_quic_range
 rig nft list table inet tjtest
-FALLBACK_SECONDS="$(connect_seconds "$TJ_TEST_REF" --user "$TJ_TEST_USER" --dns none)"
+write_gateway_manifest
+FALLBACK_SECONDS="$(connect_seconds "$TJ_TEST_REF" --user "$TJ_TEST_USER" --dns split)"
 printf 'connect with the range blocked took %s s, the ssh baseline took %s s\n' "$FALLBACK_SECONDS" "$SSH_SECONDS"
 # The extra time is the 5 s handshake budget plus the run-to-run variance of
 # a connect, measured at 1.3 s between two ssh-transport runs, so the bound
@@ -541,10 +609,27 @@ else
 	bad "the fallback took ${FALLBACK_SECONDS} s against a ${SSH_SECONDS} s baseline, want at most 8 s extra"
 fi
 TRANSPORT="$(status_transport)"
-if printf '%s' "$TRANSPORT" | grep -q '^ssh (fallback: '; then
+if printf '%s' "$TRANSPORT" | grep -qE '^ssh \(fallback: .*\), lanes tcp,udp,icmp,dns$'; then
 	ok "status shows transport ${TRANSPORT}"
 else
-	bad "status shows transport '${TRANSPORT}', want ssh with a fallback reason"
+	bad "status shows transport '${TRANSPORT}', want ssh with a fallback reason and lanes tcp,udp,icmp,dns"
+fi
+if rig tj status --json | grep -q '"lanes":"tcp,udp,icmp,dns"'; then
+	ok "status --json has lanes tcp,udp,icmp,dns"
+else
+	bad "status --json lacks lanes tcp,udp,icmp,dns"
+fi
+HELPERS="$(remote_helper_count "$TJ_TEST_REMOTE")"
+if [ "$HELPERS" -eq 4 ]; then
+	ok "the remote has 4 helper processes on the fallback session"
+else
+	bad "the remote has ${HELPERS} helper processes, want 4"
+fi
+CACHE="$(remote_cache_listing "$TJ_TEST_REMOTE")"
+if [ -z "$CACHE" ]; then
+	ok "the remote cache directory is empty while the fallback session is up"
+else
+	bad "the remote cache directory has entries while the fallback session is up: ${CACHE}"
 fi
 journal="$(rig journalctl -u tj-session --no-pager 2>/dev/null || true)"
 if printf '%s' "$journal" | grep -q "quic transport unavailable" && printf '%s' "$journal" | grep -q "udp:${QUIC_PORTS}"; then
@@ -565,8 +650,37 @@ if rig dig +time=5 +tries=2 +short "@${TJ_TEST_RESOLVER}" "$TJ_TEST_DNS_NAME" | 
 else
 	bad "UDP DNS IPv4 to ${TJ_TEST_RESOLVER} on the ssh transport"
 fi
+
+log "fallback: the private name resolves via tj0, and the gateway answers ping, on the ssh transport"
+PRIVATE_LINK="$(query_link "$GW_PRIVATE_NAME")"
+printf 'resolved %s via link %s\n' "$GW_PRIVATE_NAME" "$PRIVATE_LINK"
+if [ "$PRIVATE_LINK" = "tj0" ]; then
+	ok "${GW_PRIVATE_NAME} resolved via tj0 on the fallback session"
+else
+	bad "${GW_PRIVATE_NAME} resolved via ${PRIVATE_LINK:-<none>}, want tj0"
+fi
+if rig ping -4 -n -c 3 -W 3 "$GW_V4" | tee >(cat >&2) | grep -q '3 received'; then
+	ok "ping IPv4 to ${GW_V4} on the fallback session: 3 of 3 replies"
+else
+	bad "ping IPv4 to ${GW_V4} on the fallback session lost replies"
+fi
+
 rig tj disconnect
 sleep 2
+remove_gateway_manifest
+HELPERS="$(remote_helper_count "$TJ_TEST_REMOTE")"
+if [ "$HELPERS" -eq 0 ]; then
+	ok "no helper process remains on the remote after the fallback session"
+else
+	bad "${HELPERS} helper processes remain on the remote after the fallback session"
+fi
+LEFT="$(gateway_ssh \
+	'ls -A "$HOME/.cache/tj" 2>/dev/null; ls -A /run/user/0/tj-helper.* 2>/dev/null' || true)"
+if [ -z "$LEFT" ]; then
+	ok "no file remains on the remote after the fallback session"
+else
+	bad "files remain on the remote after the fallback session: ${LEFT}"
+fi
 LISTENERS="$(remote_quic_listeners "$TJ_TEST_REMOTE")"
 if [ -z "$LISTENERS" ]; then
 	ok "no udp listener in ${QUIC_PORTS} remains on the remote after the fallback session"

@@ -9,12 +9,20 @@
 # flags of the Evil8 connect task plus --dns), sshuttle-buf (the same with
 # --latency-buffer-size TJ_TEST_SSHUTTLE_BUF). Per session: a time-boxed
 # download from the bench server on the remote's VPC address with probes every
-# 5 s (a DNS query, a TCP connect, a disco ping), 20 TCP connects, 10 DNS
+# 5 s (a DNS query, dnstcp: the same query over TCP, echo: one ICMP reply
+# through the session, tconn: one TCP connect to the remote's tailnet SSH
+# port, a TCP connect to the resolver, a disco ping), 20 TCP connects, 10 DNS
 # queries, a system-resolver lookup of TJ_TEST_PRIVATE_NAME, and on a
 # dual-stack remote a download over IPv6. The DNS queries use TCP through
 # sshuttle, because sshuttle captures no UDP to the VPC resolver. The TCP
 # connect number is not comparable through sshuttle, which accepts the
-# connection on this machine.
+# connection on this machine. echo prints n/a for sshuttle sessions, because
+# ICMP does not go through that tunnel. tconn does not go through any
+# session; it measures the shared path next to the download.
+#
+# TJ_SSH_LANES is an environment passthrough knob: compare.sh does not set
+# it, the caller does before invoking compare.sh, and each session's probe
+# line logs its value.
 #
 # sshuttle needs a NOPASSWD sudo rule for its firewall helper, because the job
 # has no terminal. Start one short sshuttle session by hand first.
@@ -167,12 +175,13 @@ wait_ready() {
 dig_ms() { dig +time=2 +tries=1 "$@" 2>&1 | awk '/Query time/{print $4} /timed out|no servers/{print "FAIL"}'; }
 
 measure() {
-	local s="$1" cyc="$2" digopt="" gpid t0 el d c p times="" fails=0 q a
+	local s="$1" cyc="$2" digopt="" gpid t0 el d dt em tc c p times="" fails=0 q a
 	case "$s" in sshuttle*) digopt="+tcp" ;; esac
 	case "$s" in
 	sshuttle*) log "[$cyc/$s] sshuttle pid $(cat "$PIDFILE" 2>/dev/null) path: $(tailscale ping -c 1 --timeout 3s "$REMOTE" 2>&1 | tail -1)" ;;
 	*) log "[$cyc/$s] $("$TJ" status 2>&1 | tr '\n' ' ')" ;;
 	esac
+	log "[$cyc/$s] lanes knob TJ_SSH_LANES=${TJ_SSH_LANES:-unset}"
 	"$BENCH" get -addr "${V4}:${BENCH_PORT}" -mib 65536 -timeout "${DL_SECONDS}s" >"$TMP/get.out" 2>&1 &
 	gpid=$!
 	t0=$(date +%s)
@@ -180,9 +189,21 @@ measure() {
 		el=$(($(date +%s) - t0))
 		# shellcheck disable=SC2086
 		d="$(dig_ms $digopt @"$RESOLVER" "$DNS_NAME")"
+		case "$s" in
+		sshuttle*) dt="$d" ;;
+		*) dt="$(dig_ms +tcp @"$RESOLVER" "$DNS_NAME")" ;;
+		esac
+		case "$s" in
+		sshuttle*) em="n/a" ;;
+		*)
+			em="$(ping -4 -n -c 1 -W 2 "$V4" 2>&1 | grep -oE 'time=[0-9.]+' | cut -d= -f2)"
+			em="${em:-FAIL}"
+			;;
+		esac
+		tc="$("$BENCH" connect -addr "${REMOTE}:22" -n 1 -timeout 3s 2>/dev/null | grep -o 'p50_ms=[0-9.]*' | cut -d= -f2)"
 		c="$("$BENCH" connect -addr "${RESOLVER}:53" -n 1 -timeout 3s 2>/dev/null | grep -o 'failed=[0-9]* p50_ms=[0-9.]*')"
 		p="$(tailscale ping -c 1 --timeout 3s "$REMOTE" 2>&1 | grep -o 'via [^ ]*\|timed out\|direct connection not established')"
-		log "[$cyc/$s] probe t=${el}s dns=${d:-FAIL}ms ${c} ping=${p:-timeout}"
+		log "[$cyc/$s] probe t=${el}s dns=${d:-FAIL}ms dnstcp=${dt:-FAIL}ms echo=${em} tconn=${tc:-FAIL}ms ${c} ping=${p:-timeout}"
 		sleep "$PROBE_EVERY"
 	done
 	wait "$gpid"
