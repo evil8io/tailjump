@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.3.2](https://github.com/evil8io/tailjump/compare/v1.3.1...v1.3.2) (2026-09-12)
+
+
+### Bug Fixes
+
+* **session:** warn on a flapping path instead of an endpoint inside the networks ([#22](https://github.com/evil8io/tailjump/issues/22)) ([2629fef](https://github.com/evil8io/tailjump/commit/2629fef93ac0c388c355cbfb95374c8939ec142a))
+
 ## [1.3.1](https://github.com/evil8io/tailjump/compare/v1.3.0...v1.3.1) (2026-09-12)
 
 
