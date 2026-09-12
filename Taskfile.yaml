@@ -60,3 +60,7 @@ tasks:
     desc: Run the loss job in the rig; see docs/spikes/06-loss-test.md for the knobs.
     cmds:
       - bash test/e2e/loss.sh
+  e2e:compare:
+    desc: Run the tj against sshuttle comparison on this machine; see docs/spikes/09-tj-against-sshuttle.md for the knobs.
+    cmds:
+      - bash test/e2e/compare.sh
