@@ -3,9 +3,10 @@
 # rootless podman rig. It builds tj and the bench tool, starts the bench
 # server on the remote's VPC address, starts the rig, and for each transport
 # connects, applies tc netem loss and delay on the rig's own interface in
-# both directions, measures TCP connect latency, UDP DNS success, and a bulk
-# download through the session, removes the shaping, and disconnects. It
-# prints one table per transport and one RESULT line per transport.
+# both directions, measures TCP connect latency, UDP DNS success and query
+# time, and a bulk download through the session, removes the shaping, and
+# disconnects. It prints one table per transport and one RESULT line per
+# transport.
 #
 # The shaping goes on after the session is up, so the numbers describe the
 # data plane under loss and not the SSH bootstrap. It never runs tj connect
@@ -139,6 +140,12 @@ median() {
 	sort -n | awk '{ a[NR] = $1 } END { if (NR == 0) { print "0" } else if (NR % 2) { print a[(NR + 1) / 2] } else { printf "%.1f\n", (a[NR / 2] + a[NR / 2 + 1]) / 2 } }'
 }
 
+# pctl prints the nearest-rank percentile of the numbers on stdin, one per
+# line, with the rank rule of the bench tool.
+pctl() {
+	sort -n | awk -v p="$1" '{ a[NR] = $1 } END { if (NR == 0) { print "-" } else { r = int((p * NR + 99) / 100); if (r < 1) { r = 1 }; print a[r] } }'
+}
+
 log "build tj and the bench tool"
 (cd "$ROOT" && task build)
 REMOTE_ARCH="$(remote_ssh 'uname -m')"
@@ -222,16 +229,28 @@ for transport in $TRANSPORTS; do
 	fi
 
 	dns_ok="-"
+	dns_p50="-"
+	dns_p95="-"
 	if printf '%s' "$MEASURES" | grep -qw dns; then
 		log "transport ${transport}: ${DNS_N} UDP DNS queries to ${RESOLVER} with a 2 s limit"
 		n=0
+		dns_ms=""
 		for _ in $(seq 1 "$DNS_N"); do
-			if rig dig +time=2 +tries=1 +short "@${RESOLVER}" "$DNS_NAME" 2>/dev/null | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$'; then
+			out="$(rig dig +time=2 +tries=1 "@${RESOLVER}" "$DNS_NAME" 2>/dev/null || true)"
+			qt="$(printf '%s\n' "$out" | sed -nE 's/^;; Query time: ([0-9]+) msec.*/\1/p')"
+			if printf '%s\n' "$out" | grep -qE '^;; ANSWER SECTION' && [ -n "$qt" ]; then
 				n=$((n + 1))
+				dns_ms="${dns_ms} ${qt}"
 			fi
 		done
 		dns_ok="${n}/${DNS_N}"
-		printf 'answered within 2 s: %s\n' "$dns_ok"
+		if [ -n "$dns_ms" ]; then
+			# shellcheck disable=SC2086
+			dns_p50="$(printf '%s\n' $dns_ms | pctl 50)"
+			# shellcheck disable=SC2086
+			dns_p95="$(printf '%s\n' $dns_ms | pctl 95)"
+		fi
+		printf 'answered within 2 s: %s, query time p50 %s ms, p95 %s ms\n' "$dns_ok" "$dns_p50" "$dns_p95"
 	fi
 
 	bulk4="-"
@@ -271,10 +290,11 @@ for transport in $TRANSPORTS; do
 	printf '| Connect wall time | %s s |\n' "$connect_s"
 	printf '| TCP connect p50 / p95 / failed of %s | %s ms / %s ms / %s |\n' "$CONNECT_N" "$connect_p50" "$connect_p95" "$connect_failed"
 	printf '| UDP DNS answered within 2 s | %s |\n' "$dns_ok"
+	printf '| UDP DNS query time p50 / p95 | %s ms / %s ms |\n' "$dns_p50" "$dns_p95"
 	printf '| Bulk IPv4 median Mbit/s (runs:%s) | %s |\n' "$bulk4_runs" "$bulk4"
 	printf '| Bulk IPv6 median Mbit/s (runs:%s) | %s |\n' "$bulk6_runs" "$bulk6"
-	printf 'RESULT target=%s transport=%s controller=%s loss=%s delay=%s label=%q connect_s=%s p50=%s p95=%s failed=%s dns=%s bulk4=%s bulk6=%s\n' \
-		"$TARGET" "$transport" "${TJ_QUIC_CONTROLLER:-default}" "$LOSS" "$DELAY" "$LABEL" "$connect_s" "$connect_p50" "$connect_p95" "$connect_failed" "$dns_ok" "$bulk4" "$bulk6"
+	printf 'RESULT target=%s transport=%s controller=%s loss=%s delay=%s label=%q connect_s=%s p50=%s p95=%s failed=%s dns=%s dns_p50=%s dns_p95=%s bulk4=%s bulk6=%s\n' \
+		"$TARGET" "$transport" "${TJ_QUIC_CONTROLLER:-default}" "$LOSS" "$DELAY" "$LABEL" "$connect_s" "$connect_p50" "$connect_p95" "$connect_failed" "$dns_ok" "$dns_p50" "$dns_p95" "$bulk4" "$bulk6"
 done
 
 log "confirm the remote is clean"
