@@ -31,6 +31,11 @@ dns:
 checks:
   - name: corp-dns
     tcp: 10.1.0.2:53
+transport:
+  quic_ports: "7443-7452"
+  bandwidth:
+    up: 20 mbps
+    down: 50 mbps
 ```
 
 ## Fields
@@ -49,6 +54,9 @@ checks:
 | `checks` | list of check | no | TCP endpoints `tj doctor` tests, from the remote and from the client. |
 | `checks[].name` | string | yes, inside a check | A label for the check line in `tj doctor` output. |
 | `checks[].tcp` | `host:port` | yes, inside a check | The endpoint to dial. |
+| `transport.quic_ports` | `first-last` | no | The UDP port range the helper listens in for the QUIC transport, on the remote's tailnet address. Default `7443-7452`. The tailnet policy must pass the range; see "The transport section". |
+| `transport.bandwidth.up` | rate | no | The rate from the client to the remote, for example `20 mbps`. A set bandwidth selects the Brutal congestion controller at these rates; an unset one selects BBR. `up` and `down` go together. |
+| `transport.bandwidth.down` | rate | no | The rate from the remote to the client, for example `50 mbps`. |
 
 An absent `discovery` section means every source is on. An absent
 `discovery.link_routes` or `discovery.cloud_metadata` key, inside a present
@@ -85,6 +93,22 @@ remote, minus the Tailscale MagicDNS addresses. Without `dns.domains`,
 `--dns split` is not available; `--dns none` and `--dns all` still work.
 The `all` mode needs no manifest at all: it sends every query to `dns.servers`,
 or to the discovered resolvers when the manifest sets none.
+
+## The transport section
+
+A session runs its flows over a QUIC connection to the remote's tailnet
+address, and falls back to the SSH channel when that connection does not
+come up. The helper binds the first free UDP port of `transport.quic_ports`
+on the tailnet address only, so the tailnet policy needs one UDP rule for the
+range, for example `{"src": ["group:example"], "dst": ["tag:example"], "ip": ["udp:7443-7452"]}`.
+Without the rule the session still works, on the SSH transport, and says so.
+
+A rate is a number and a unit: `bps`, `kbps`, `mbps`, `gbps`, or `tbps`, in
+bits per second, case-insensitive, with an optional space. Set
+`transport.bandwidth` only when the path has a known capacity that the
+remote's operator accepts as a fixed send rate: Brutal sends at that rate and
+compensates loss, which is unfair on a shared relay. Without it, BBR measures
+the path.
 
 ## Checks
 

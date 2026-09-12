@@ -12,6 +12,7 @@ import (
 	"github.com/evil8io/tailjump/internal/config"
 	"github.com/evil8io/tailjump/internal/dns"
 	"github.com/evil8io/tailjump/internal/manifest"
+	"github.com/evil8io/tailjump/internal/transport"
 )
 
 // newRemoteConfigCmd is the tj remote command group. It manages the config
@@ -47,14 +48,15 @@ func newRemoteListCmd() *cobra.Command {
 				return json.NewEncoder(cmd.OutOrStdout()).Encode(cfg.Remotes)
 			}
 			w := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 4, 2, ' ', 0)
-			_, _ = fmt.Fprintln(w, "ALIAS\tHOST\tUSER\tDNS\tNETWORKS\tEXCLUDE")
+			_, _ = fmt.Fprintln(w, "ALIAS\tHOST\tUSER\tDNS\tTRANSPORT\tNETWORKS\tEXCLUDE")
 			for _, alias := range sortedRemoteAliases(cfg) {
 				rc := cfg.Remotes[alias]
-				_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n",
+				_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
 					alias,
 					valueOrDash(rc.Host),
 					valueOrDash(rc.User),
 					valueOrDash(rc.DNS),
+					valueOrDash(rc.Transport),
 					joinOrDash(rc.Networks),
 					joinOrDash(rc.Exclude),
 				)
@@ -89,6 +91,7 @@ func newRemoteShowCmd() *cobra.Command {
 			_, _ = fmt.Fprintf(w, "Host:\t%s\n", valueOrDash(rc.Host))
 			_, _ = fmt.Fprintf(w, "User:\t%s\n", valueOrDash(rc.User))
 			_, _ = fmt.Fprintf(w, "DNS:\t%s\n", valueOrDash(rc.DNS))
+			_, _ = fmt.Fprintf(w, "Transport:\t%s\n", valueOrDash(rc.Transport))
 			_, _ = fmt.Fprintf(w, "Networks:\t%s\n", joinOrDash(rc.Networks))
 			_, _ = fmt.Fprintf(w, "Exclude:\t%s\n", joinOrDash(rc.Exclude))
 			return w.Flush()
@@ -194,6 +197,7 @@ func addRemoteFlags(cmd *cobra.Command) {
 	cmd.Flags().String("host", "", "the remote host")
 	cmd.Flags().String("user", "", "the SSH user")
 	cmd.Flags().String("dns", "", "the DNS mode: none, split, or all")
+	cmd.Flags().String("transport", "", "the data plane transport: auto, quic, or ssh")
 	cmd.Flags().StringArray("network", nil, "a CIDR to route for this remote, repeatable")
 	cmd.Flags().StringArray("exclude", nil, "a CIDR to exclude for this remote, repeatable")
 }
@@ -216,6 +220,13 @@ func remoteFromFlags(cmd *cobra.Command, base config.RemoteConfig) (config.Remot
 			return rc, fmt.Errorf("invalid --dns %q, want none, split, or all", v)
 		}
 		rc.DNS = v
+	}
+	if f.Changed("transport") {
+		v, _ := f.GetString("transport")
+		if !transport.Valid(v) {
+			return rc, fmt.Errorf("invalid --transport %q, want auto, quic, or ssh", v)
+		}
+		rc.Transport = v
 	}
 	if f.Changed("network") {
 		v, _ := f.GetStringArray("network")

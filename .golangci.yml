@@ -11,8 +11,17 @@ linters:
       - linters:
           - revive
         text: "^exported:"
+    paths:
+      - internal/congestion/bbr
+      - internal/congestion/brutal
+      - internal/congestion/common
 
 formatters:
   enable:
     - gofmt
     - gofumpt
+  exclusions:
+    paths:
+      - internal/congestion/bbr
+      - internal/congestion/brutal
+      - internal/congestion/common

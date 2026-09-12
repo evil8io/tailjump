@@ -76,10 +76,10 @@ interactively once and may ask for your password.
 | `tj setup` | Install the sudoers rule and the root copy; check the required tools. |
 | `tj list [--tag <tag>] [--probe] [--user <user>]` | List the online tailnet peers. `--probe` opens SSH to each and marks the ones with a manifest. |
 | `tj describe <remote> [--user <user>] [--no-discovery]` | Print the merged manifest, discovery result, and computed session networks for a remote, without starting a session. |
-| `tj doctor <remote> [--user <user>]` | Report readiness facts for a remote: peer online, SSH ok, manifest present, discovery ok, the computed session networks, and DNS mode availability. |
-| `tj connect <remote> [--user <user>] [--dns none\|split\|all] [--network <cidr>]... [--exclude <cidr>]... [--no-discovery] [--replace]` | Start a session into the remote's network. |
+| `tj doctor <remote> [--user <user>]` | Report readiness facts for a remote: peer online, SSH ok, manifest present, discovery ok, the computed session networks, DNS mode availability, and whether the QUIC transport comes up. |
+| `tj connect <remote> [--user <user>] [--dns none\|split\|all] [--transport auto\|quic\|ssh] [--network <cidr>]... [--exclude <cidr>]... [--no-discovery] [--replace]` | Start a session into the remote's network. |
 | `tj disconnect` | End the active session. Not an error when none is active. |
-| `tj status [--json]` | Print the active session: the remote, the DNS mode, the networks, and the uptime. |
+| `tj status [--json]` | Print the active session: the remote, the transport, the DNS mode, the networks, and the uptime. |
 | `tj remote list\|show\|add\|set\|rm` | Manage the config aliases for remotes. |
 | `tj config path\|get\|set` | Read and write the defaults and the global exclude list. |
 | `tj version` | Print the tj version. |
@@ -113,6 +113,7 @@ $ tj status
 Remote:      gw.example (100.64.0.10)
 User:        root
 Status:      up
+Transport:   quic (port 7443)
 DNS mode:    split
 Uptime:      4m12s
 Networks:    10.0.0.0/16, 2001:db8::/56, 10.1.0.2/32
@@ -122,9 +123,9 @@ $ tj disconnect
 
 ## Managing config
 
-`tj` reads `$XDG_CONFIG_HOME/tj/config.yaml`. It holds the SSH user and DNS
-defaults, a global exclude list, and named remotes. The file is optional; a
-hostname or a tag works without it.
+`tj` reads `$XDG_CONFIG_HOME/tj/config.yaml`. It holds the SSH user, DNS,
+and transport defaults, a global exclude list, and named remotes. The file is
+optional; a hostname or a tag works without it.
 
 `tj config` reads and writes the defaults and the global exclude list. `tj
 config path` prints the resolved file path.
@@ -133,14 +134,16 @@ config path` prints the resolved file path.
 $ tj config set defaults.user root
 $ tj config set defaults.dns split
 $ tj config get
-defaults.user:  root
-defaults.dns:   split
-exclude:        -
+defaults.user:       root
+defaults.dns:        split
+defaults.transport:  -
+exclude:             -
 ```
 
 `tj remote` manages the named remotes. A remote binds an alias to a host and
-optional per-remote overrides: the SSH user, the DNS mode, extra networks to
-route, and networks to exclude. `--network` and `--exclude` repeat.
+optional per-remote overrides: the SSH user, the DNS mode, the transport,
+extra networks to route, and networks to exclude. `--network` and `--exclude`
+repeat.
 
 ```
 $ tj remote add evil8 --host gw.example --user root --dns split \
@@ -176,8 +179,30 @@ and cloud metadata alone.
   second one and names the active one. A session ends on `disconnect`, on
   logout, or on a failed liveness check, and it never restarts after a
   reboot. See contract C4.
-* **The tailnet policy** needs one SSH rule per remote and user, and
-  nothing else; a tag is optional and only filters `list`. See contract C5.
+* **The tailnet policy** needs one SSH rule per remote and user, and one
+  UDP rule per remote for the QUIC port range, for example
+  `{"src": ["group:example"], "dst": ["tag:example"], "ip": ["udp:7443-7452"]}`.
+  Without the UDP rule a session works on the SSH transport and says so. A
+  tag is optional and only filters `list`. See contract C5 and "The
+  transport".
+
+## The transport
+
+A session carries its flows over one QUIC connection to the remote's tailnet
+address. The helper binds one UDP port from the manifest range, default
+`7443-7452`, on that address only, and the two sides pin each other's
+per-session certificate over the SSH channel. QUIC recovers from loss per
+packet and keeps each flow independent, so one lost packet stalls one flow and
+not the session; a single SSH channel stalls every flow on a relayed path.
+BBR is the congestion controller by default; a manifest with
+`transport.bandwidth` selects Brutal at that rate.
+
+`--transport auto`, the default, tries QUIC and falls back to the SSH channel
+when the helper cannot listen or the handshake does not complete within 5 s.
+The session then logs one warning that names the policy rule, and `tj status`
+prints `ssh` with the reason. `--transport quic` fails instead of falling
+back, for a test. `--transport ssh` skips QUIC. `tj doctor` reports whether
+the transport comes up on a remote.
 
 ## DNS modes
 
@@ -208,8 +233,8 @@ somewhere else. `test/e2e` is a rootless podman rig for exactly this: it
 builds `tj`, starts an `ubuntu:26.04` container with systemd, and connects
 from inside it against a real gateway. Set the real gateway in
 `test/e2e/target.env` (git-ignored; see `test/e2e/target.env.example`), then
-run `test/e2e/run.sh` for the reachability and DNS tests, or
-`test/e2e/crash.sh` for the interrupted-session cleanup test.
+run `test/e2e/run.sh` for the reachability, DNS, transport, and fallback
+tests, or `test/e2e/crash.sh` for the interrupted-session cleanup test.
 
 ## Docs
 

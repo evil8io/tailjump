@@ -126,26 +126,24 @@ func Run(ctx context.Context, planPath string) (err error) {
 	}
 	defer func() { _ = sshClient.Close() }()
 
-	helperBytes, err := embed.Helper(plan.HelperArch)
+	muxClient, err := startHelper(sshClient, plan.HelperArch)
 	if err != nil {
 		return err
-	}
-	helperPath, err := uploadHelper(sshClient, helperBytes)
-	if err != nil {
-		return err
-	}
-	slog.Debug("helper uploaded", "path", helperPath, "arch", plan.HelperArch)
-
-	transport, err := sshClient.Exec("exec " + helperPath)
-	if err != nil {
-		return fmt.Errorf("start helper: %w", err)
-	}
-	muxClient, err := mux.NewClient(transport)
-	if err != nil {
-		return fmt.Errorf("open mux: %w", err)
 	}
 	defer func() { _ = muxClient.Close() }()
 	slog.Debug("mux up", "helper", muxClient.Info().Hostname, "version", muxClient.Info().Version)
+
+	var dialer mux.Dialer = muxClient
+	var quicWait <-chan struct{}
+	quicClient, err := selectTransport(ctx, muxClient, addr, plan, state)
+	if err != nil {
+		return err
+	}
+	if quicClient != nil {
+		defer func() { _ = quicClient.Close() }()
+		dialer = quicClient
+		quicWait = quicClient.Wait()
+	}
 
 	dev, name, err := plat.Device.Create(deviceName, deviceMTU)
 	if err != nil {
@@ -172,7 +170,7 @@ func Run(ctx context.Context, planPath string) (err error) {
 		return fmt.Errorf("apply dns: %w", err)
 	}
 
-	dp, err := dataplane.New(dev, muxClient, deviceMTU)
+	dp, err := dataplane.New(dev, dialer, deviceMTU)
 	if err != nil {
 		revertDNS(plat, name)
 		removeRoutes(plat, name, routes)
@@ -185,19 +183,24 @@ func Run(ctx context.Context, planPath string) (err error) {
 	if err := writeState(statePath, state); err != nil {
 		slog.Warn("write up state", "error", err)
 	}
-	slog.Info("session up", "remote", plan.Remote, "networks", len(plan.Networks), "dns", plan.DNS.Mode)
+	slog.Info("session up", "remote", plan.Remote, "networks", len(plan.Networks), "dns", plan.DNS.Mode, "transport", state.Transport)
 
 	select {
 	case <-ctx.Done():
 		slog.Info("session stopping on signal")
 	case <-muxClient.Wait():
 		slog.Warn("session ended: mux closed")
+	case <-quicWait:
+		slog.Warn("session ended: quic connection closed")
 	}
 
 	state.Status = StatusStopping
 	_ = writeState(statePath, state)
 	revertDNS(plat, name)
 	removeRoutes(plat, name, routes)
+	if quicClient != nil {
+		_ = quicClient.Close()
+	}
 	if err := muxClient.Quit(); err != nil {
 		slog.Debug("quit helper", "error", err)
 	}
@@ -277,6 +280,31 @@ func cleanup(plat platform.Platform) error {
 	}
 	slog.Info("cleanup complete")
 	return nil
+}
+
+// startHelper uploads the helper for the remote's architecture, starts it,
+// and opens the mux over its stdin and stdout.
+func startHelper(client *sshc.Client, arch string) (*mux.Client, error) {
+	helperBytes, err := embed.Helper(arch)
+	if err != nil {
+		return nil, err
+	}
+	helperPath, err := uploadHelper(client, helperBytes)
+	if err != nil {
+		return nil, err
+	}
+	slog.Debug("helper uploaded", "path", helperPath, "arch", arch)
+
+	channel, err := client.Exec("exec " + helperPath)
+	if err != nil {
+		return nil, fmt.Errorf("start helper: %w", err)
+	}
+	muxClient, err := mux.NewClient(channel)
+	if err != nil {
+		_ = channel.Close()
+		return nil, fmt.Errorf("open mux: %w", err)
+	}
+	return muxClient, nil
 }
 
 func uploadHelper(client *sshc.Client, body []byte) (string, error) {

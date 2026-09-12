@@ -79,7 +79,32 @@ func (c *Client) Wait() <-chan struct{} {
 // session down, so the write can return a shutdown error before it returns
 // success. That error means quit arrived, so it is success, not a failure.
 func (c *Client) Quit() error {
-	if _, err := c.ctl.Write([]byte("quit\n")); err != nil && !sessionGone(err) {
+	if _, err := c.ctl.Write([]byte(verbQuit + "\n")); err != nil && !sessionGone(err) {
+		return err
+	}
+	return nil
+}
+
+// NegotiateQUIC asks the helper to start its QUIC listener and returns the
+// port and the helper's certificate fingerprint. A helper that cannot listen
+// answers with an *UnavailableError.
+func (c *Client) NegotiateQUIC(req QUICRequest) (QUICReply, error) {
+	if _, err := c.ctl.Write(req.encode()); err != nil {
+		return QUICReply{}, fmt.Errorf("quic request: %w", err)
+	}
+	_ = c.ctl.SetReadDeadline(time.Now().Add(quicReplyTimeout))
+	defer func() { _ = c.ctl.SetReadDeadline(time.Time{}) }()
+	line, err := readLine(c.ctl, maxLineLen)
+	if err != nil {
+		return QUICReply{}, fmt.Errorf("quic reply: %w", err)
+	}
+	return parseQUICReply(line)
+}
+
+// AbandonQUIC tells the helper to close its listener, after a dial that did
+// not complete. The session then runs on the SSH transport.
+func (c *Client) AbandonQUIC() error {
+	if _, err := c.ctl.Write([]byte(verbAbandon + "\n")); err != nil && !sessionGone(err) {
 		return err
 	}
 	return nil

@@ -54,10 +54,25 @@ func printState(w io.Writer, st *State) error {
 	_, _ = fmt.Fprintf(tw, "Remote:\t%s (%s)\n", st.Remote, st.Addr)
 	_, _ = fmt.Fprintf(tw, "User:\t%s\n", st.User)
 	_, _ = fmt.Fprintf(tw, "Status:\t%s\n", st.Status)
+	_, _ = fmt.Fprintf(tw, "Transport:\t%s\n", transportLine(st))
 	_, _ = fmt.Fprintf(tw, "DNS mode:\t%s\n", st.DNS.Mode)
 	_, _ = fmt.Fprintf(tw, "Uptime:\t%s\n", uptime(st.StartedAt))
 	_, _ = fmt.Fprintf(tw, "Networks:\t%s\n", joinOrNone(st.Networks))
 	return tw.Flush()
+}
+
+func transportLine(st *State) string {
+	switch st.Transport {
+	case TransportQUIC:
+		return fmt.Sprintf("quic (port %d)", st.QUICPort)
+	case TransportSSH:
+		if st.Fallback != "" {
+			return "ssh (fallback: " + st.Fallback + ")"
+		}
+		return "ssh"
+	default:
+		return "unknown"
+	}
 }
 
 func uptime(startedAt string) string {
