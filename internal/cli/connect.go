@@ -25,10 +25,11 @@ const exitActiveSession = 3
 
 func newConnectCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "connect <remote>",
-		Short: "Start a session into the remote's network",
-		Args:  cobra.ExactArgs(1),
-		RunE:  runConnect,
+		Use:     "connect <remote>",
+		Aliases: []string{"up"},
+		Short:   "Start a session into the remote's network",
+		Args:    cobra.ExactArgs(1),
+		RunE:    runConnect,
 	}
 	cmd.Flags().String("user", "", "the SSH user")
 	cmd.Flags().String("dns", "", "the DNS mode: none, split, or all")

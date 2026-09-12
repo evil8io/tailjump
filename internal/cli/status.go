@@ -8,8 +8,9 @@ import (
 
 func newStatusCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "status",
-		Short: "Print the active session, its networks, the DNS mode, and the uptime",
+		Use:     "status",
+		Aliases: []string{"st"},
+		Short:   "Print the active session, its networks, the DNS mode, and the uptime",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			asJSON, _ := cmd.Flags().GetBool("json")
 			return session.Status(cmd.OutOrStdout(), asJSON)

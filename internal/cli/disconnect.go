@@ -8,8 +8,9 @@ import (
 
 func newDisconnectCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "disconnect",
-		Short: "End the active session",
+		Use:     "disconnect",
+		Aliases: []string{"down"},
+		Short:   "End the active session",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return session.Disconnect(cmd.Context())
 		},
