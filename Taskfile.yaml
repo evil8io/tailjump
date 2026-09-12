@@ -49,7 +49,14 @@ tasks:
       - gofmt -l -w .
       - go mod tidy
   e2e:
-    desc: Run the container rig against the Evil8 shared gateway.
+    desc: Run the podman rig against the shared gateway in test/e2e/target.env.
     cmds:
-      - echo "the e2e rig arrives in chunk 4"
-      - exit 1
+      - bash test/e2e/run.sh
+  e2e:crash:
+    desc: Run the interrupted-session cleanup test in the rig.
+    cmds:
+      - bash test/e2e/crash.sh
+  e2e:loss:
+    desc: Run the loss job in the rig; see docs/spikes/06-loss-test.md for the knobs.
+    cmds:
+      - bash test/e2e/loss.sh

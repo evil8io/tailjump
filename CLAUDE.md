@@ -17,7 +17,7 @@ tailjump, binary `tj`, gives an engineer a session into a remote network over Ta
 
 ## Tools
 
-`mise install` installs go, golangci-lint, goreleaser, and task. Tasks: `task build`, `task helpers`, `task test`, `task lint`, `task e2e`.
+`mise install` installs go, golangci-lint, goreleaser, and task. Tasks: `task build`, `task helpers`, `task test`, `task lint`, `task e2e`, `task e2e:crash`, `task e2e:loss`.
 
 ## Public repository hygiene
 
