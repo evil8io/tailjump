@@ -1,10 +1,10 @@
 # tailjump
 
-`tj` starts a session into a remote network over Tailscale SSH and routes the
-remote's networks through a local TUN device, in the style of
-[sshuttle](https://github.com/sshuttle/sshuttle). The remote needs Tailscale
-SSH and nothing else: no installed software, no subnet routes, and no state
-between sessions.
+`tj` starts a session into a remote network over Tailscale SSH, in the style
+of [sshuttle](https://github.com/sshuttle/sshuttle). The remote needs
+Tailscale SSH and nothing else: no installed software, no subnet routes, and
+no state between sessions. Unlike sshuttle, which redirects TCP with firewall
+rules, `tj` captures the flows with a TUN device and a netstack.
 
 ## How it works
 
