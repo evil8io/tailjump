@@ -233,10 +233,10 @@ somewhere else. `test/e2e` is a rootless podman rig for exactly this: it
 builds `tj`, starts an `ubuntu:26.04` container with systemd, and connects
 from inside it against a real gateway. Set the real gateway in
 `test/e2e/target.env` (git-ignored; see `test/e2e/target.env.example`), then
-run `test/e2e/run.sh` for the reachability, DNS, transport, and fallback
-tests, or `test/e2e/crash.sh` for the interrupted-session cleanup test.
-`test/e2e/loss.sh` measures a session on each transport under `tc netem`
-loss and delay inside the rig; its numbers are in `docs/spikes/06-loss-test.md`.
+run `task e2e` for the reachability, DNS, transport, and fallback tests, or
+`task e2e:crash` for the interrupted-session cleanup test. `task e2e:loss`
+measures a session on each transport under `tc netem` loss and delay inside
+the rig; its numbers are in `docs/spikes/06-loss-test.md`.
 
 ## Docs
 
