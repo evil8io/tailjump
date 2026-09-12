@@ -23,6 +23,7 @@ func samplePlan() *Plan {
 			Domains: []string{"corp.example"},
 		},
 		HelperArch: "arm64",
+		Protocols:  "tcp,udp,icmp",
 	}
 }
 
@@ -161,4 +162,21 @@ func prefixSet(prefixes []netip.Prefix) map[string]bool {
 		set[p.String()] = true
 	}
 	return set
+}
+
+func TestPlanProtocolSet(t *testing.T) {
+	p := samplePlan()
+	set, err := p.protocolSet()
+	if err != nil || set.String() != "tcp,udp,icmp" {
+		t.Fatalf("empty plan protocols = %q %v, want all", set, err)
+	}
+	p.Protocols = "tcp,udp"
+	set, err = p.protocolSet()
+	if err != nil || set.String() != "tcp,udp" {
+		t.Fatalf("plan protocols tcp,udp = %q %v", set, err)
+	}
+	p.Protocols = "gre"
+	if _, err := p.protocolSet(); err == nil {
+		t.Fatal("invalid plan protocols parsed")
+	}
 }

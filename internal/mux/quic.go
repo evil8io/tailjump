@@ -153,6 +153,16 @@ func (q *QUICClient) DialUDP(dst netip.AddrPort) (*UDPConn, error) {
 	return &UDPConn{stream: stream}, nil
 }
 
+// DialICMP opens a stream for an ICMP echo flow. As on the SSH transport, it
+// does not wait for the status byte.
+func (q *QUICClient) DialICMP(dst netip.Addr, ident uint16) (*EchoConn, error) {
+	stream, err := q.openStream(kindICMP, netip.AddrPortFrom(dst, ident))
+	if err != nil {
+		return nil, err
+	}
+	return &EchoConn{stream: stream}, nil
+}
+
 func (q *QUICClient) openStream(kind byte, dst netip.AddrPort) (*quicStream, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), quicOpenTimeout)
 	defer cancel()

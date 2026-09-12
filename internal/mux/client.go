@@ -151,7 +151,7 @@ type UDPConn struct {
 
 // DialUDP opens a UDP stream to the destination. It does not wait for a status
 // byte, so the caller can send the first datagram at once and save a round
-// trip. A dial error on the helper closes the stream, which ReadFrame reports
+// trip. A dial error on the helper closes the stream, which ReadReply reports
 // as the end of the flow.
 func (c *Client) DialUDP(dst netip.AddrPort) (*UDPConn, error) {
 	stream, err := c.openStream(kindUDP, dst)
@@ -159,6 +159,31 @@ func (c *Client) DialUDP(dst netip.AddrPort) (*UDPConn, error) {
 		return nil, err
 	}
 	return &UDPConn{stream: stream}, nil
+}
+
+// DialICMP opens an ICMP echo stream to the destination for one identifier.
+// Like DialUDP it does not wait for the status byte; EchoConn.ReadStatus
+// reads it before the first reply.
+func (c *Client) DialICMP(dst netip.Addr, ident uint16) (*EchoConn, error) {
+	stream, err := c.openStream(kindICMP, netip.AddrPortFrom(dst, ident))
+	if err != nil {
+		return nil, err
+	}
+	return &EchoConn{stream: stream}, nil
+}
+
+// QueryEchoSocket asks the helper which socket it offers for ICMP echo.
+func (c *Client) QueryEchoSocket() (EchoSocketInfo, error) {
+	if _, err := c.ctl.Write([]byte(verbICMP + "\n")); err != nil {
+		return EchoSocketInfo{}, fmt.Errorf("icmp request: %w", err)
+	}
+	_ = c.ctl.SetReadDeadline(time.Now().Add(quicReplyTimeout))
+	defer func() { _ = c.ctl.SetReadDeadline(time.Time{}) }()
+	line, err := readLine(c.ctl, maxLineLen)
+	if err != nil {
+		return EchoSocketInfo{}, fmt.Errorf("icmp reply: %w", err)
+	}
+	return parseEchoSocketInfo(line)
 }
 
 func (c *Client) openStream(kind byte, dst netip.AddrPort) (*yamux.Stream, error) {
@@ -177,18 +202,23 @@ func (c *Client) openStream(kind byte, dst netip.AddrPort) (*yamux.Stream, error
 	return stream, nil
 }
 
-// WriteFrame sends one datagram.
-func (u *UDPConn) WriteFrame(p []byte) error {
-	return writeFrame(u.stream, p)
+// WriteDatagram sends one datagram with the TTL of the captured packet.
+func (u *UDPConn) WriteDatagram(ttl uint8, p []byte) error {
+	return writeFrame(u.stream, encodeUDPRequest(ttl, p))
 }
 
-// ReadFrame reads one datagram. It returns an error when the helper closes the
-// flow, for example on its idle timeout or on a dial error.
-func (u *UDPConn) ReadFrame() ([]byte, error) {
-	return readFrame(u.stream)
+// ReadReply reads one reply frame: a datagram, or an ICMP error for a sent
+// datagram. It returns an error when the helper closes the flow, for
+// example on its idle timeout or on a dial error.
+func (u *UDPConn) ReadReply() (UDPReply, error) {
+	frame, err := readFrame(u.stream)
+	if err != nil {
+		return UDPReply{}, err
+	}
+	return decodeUDPReply(frame)
 }
 
-// SetReadDeadline sets the deadline for ReadFrame.
+// SetReadDeadline sets the deadline for ReadReply.
 func (u *UDPConn) SetReadDeadline(t time.Time) error {
 	return u.stream.SetReadDeadline(t)
 }

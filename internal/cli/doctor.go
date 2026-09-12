@@ -107,33 +107,44 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 
 	add("remote manifest checks", "pending (needs the helper)")
 
-	port, err := doctorQUIC(ctx, client, res, m, rr)
-	if err != nil {
+	probe, err := doctorProbe(ctx, client, res, m, rr)
+	switch {
+	case err != nil:
 		add("quic transport", "fail: "+err.Error())
-	} else {
-		add("quic transport", fmt.Sprintf("ok, port %d", port))
+		add("icmp echo socket", "fail: "+err.Error())
+	default:
+		if probe.QUICErr != nil {
+			add("quic transport", "fail: "+probe.QUICErr.Error())
+		} else {
+			add("quic transport", fmt.Sprintf("ok, port %d", probe.QUICPort))
+		}
+		if probe.EchoErr != nil {
+			add("icmp echo socket", "fail: "+probe.EchoErr.Error())
+		} else {
+			add("icmp echo socket", probe.Echo.String())
+		}
 	}
 
 	return printDoctor(cmd, checks, asJSON)
 }
 
-// doctorQUIC brings the QUIC transport up through a temporary helper and
+// doctorProbe brings the QUIC transport up through a temporary helper and
 // tears it down, so the report shows whether a UDP packet reaches the range
-// on the remote.
-func doctorQUIC(ctx context.Context, client *sshc.Client, res *discovery.Result, m *manifest.Manifest, rr *resolvedRemote) (uint16, error) {
+// on the remote, and asks the helper which socket it has for ICMP echo.
+func doctorProbe(ctx context.Context, client *sshc.Client, res *discovery.Result, m *manifest.Manifest, rr *resolvedRemote) (session.ProbeResult, error) {
 	goarch, err := helper.ArchForUname(res.UnameM)
 	if err != nil {
-		return 0, err
+		return session.ProbeResult{}, err
 	}
 	ports, err := m.QUICPorts()
 	if err != nil {
-		return 0, err
+		return session.ProbeResult{}, err
 	}
 	up, down, err := m.Bandwidth()
 	if err != nil {
-		return 0, err
+		return session.ProbeResult{}, err
 	}
-	return session.ProbeQUIC(ctx, client, goarch, rr.Addr, ports, up, down)
+	return session.Probe(ctx, client, goarch, rr.Addr, ports, up, down)
 }
 
 func decodeDoctorManifest(res *discovery.Result) (*manifest.Manifest, error) {

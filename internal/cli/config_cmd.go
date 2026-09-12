@@ -9,6 +9,7 @@ import (
 
 	"github.com/evil8io/tailjump/internal/config"
 	"github.com/evil8io/tailjump/internal/dns"
+	"github.com/evil8io/tailjump/internal/protocols"
 	"github.com/evil8io/tailjump/internal/transport"
 )
 
@@ -44,6 +45,7 @@ type configGetOutput struct {
 	User      string   `json:"user"`
 	DNS       string   `json:"dns"`
 	Transport string   `json:"transport"`
+	Protocols string   `json:"protocols"`
 	Exclude   []string `json:"exclude,omitempty"`
 }
 
@@ -63,6 +65,7 @@ func newConfigGetCmd() *cobra.Command {
 					User:      cfg.Defaults.User,
 					DNS:       cfg.Defaults.DNS,
 					Transport: cfg.Defaults.Transport,
+					Protocols: cfg.Defaults.Protocols,
 					Exclude:   cfg.Exclude,
 				})
 			}
@@ -70,6 +73,7 @@ func newConfigGetCmd() *cobra.Command {
 			_, _ = fmt.Fprintf(w, "defaults.user:\t%s\n", valueOrDash(cfg.Defaults.User))
 			_, _ = fmt.Fprintf(w, "defaults.dns:\t%s\n", valueOrDash(cfg.Defaults.DNS))
 			_, _ = fmt.Fprintf(w, "defaults.transport:\t%s\n", valueOrDash(cfg.Defaults.Transport))
+			_, _ = fmt.Fprintf(w, "defaults.protocols:\t%s\n", valueOrDash(cfg.Defaults.Protocols))
 			_, _ = fmt.Fprintf(w, "exclude:\t%s\n", joinOrDash(cfg.Exclude))
 			return w.Flush()
 		},
@@ -81,7 +85,7 @@ func newConfigGetCmd() *cobra.Command {
 func newConfigSetCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "set <key> <value>",
-		Short: "Set defaults.user, defaults.dns, or defaults.transport",
+		Short: "Set defaults.user, defaults.dns, defaults.transport, or defaults.protocols",
 		Args:  cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			key, value := args[0], args[1]
@@ -103,8 +107,13 @@ func newConfigSetCmd() *cobra.Command {
 					return fmt.Errorf("invalid transport %q, want auto, quic, or ssh", value)
 				}
 				cfg.Defaults.Transport = value
+			case "defaults.protocols":
+				if !protocols.Valid(value) {
+					return fmt.Errorf("invalid protocols %q, want a list of tcp, udp, and icmp", value)
+				}
+				cfg.Defaults.Protocols = value
 			default:
-				return fmt.Errorf("unknown key %q; set defaults.user, defaults.dns, or defaults.transport", key)
+				return fmt.Errorf("unknown key %q; set defaults.user, defaults.dns, defaults.transport, or defaults.protocols", key)
 			}
 			if err := saveLocalConfig(path, cfg); err != nil {
 				return fmt.Errorf("save config: %w", err)

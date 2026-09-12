@@ -97,6 +97,10 @@ func Run(ctx context.Context, planPath string) (err error) {
 	if err != nil {
 		return fmt.Errorf("plan addr %q: %w", plan.Addr, err)
 	}
+	set, err := plan.protocolSet()
+	if err != nil {
+		return err
+	}
 
 	ctx, stop := signal.NotifyContext(ctx, syscall.SIGTERM, syscall.SIGINT)
 	defer stop()
@@ -111,6 +115,7 @@ func Run(ctx context.Context, planPath string) (err error) {
 		StartedAt: started.UTC().Format(time.RFC3339),
 		PID:       os.Getpid(),
 		Status:    StatusStarting,
+		Protocols: set.String(),
 	}
 	if err := writeState(statePath, state); err != nil {
 		return err
@@ -170,7 +175,7 @@ func Run(ctx context.Context, planPath string) (err error) {
 		return fmt.Errorf("apply dns: %w", err)
 	}
 
-	dp, err := dataplane.New(dev, dialer, deviceMTU)
+	dp, err := dataplane.New(dev, dialer, deviceMTU, set)
 	if err != nil {
 		revertDNS(plat, name)
 		removeRoutes(plat, name, routes)
@@ -183,7 +188,7 @@ func Run(ctx context.Context, planPath string) (err error) {
 	if err := writeState(statePath, state); err != nil {
 		slog.Warn("write up state", "error", err)
 	}
-	slog.Info("session up", "remote", plan.Remote, "networks", len(plan.Networks), "dns", plan.DNS.Mode, "transport", state.Transport)
+	slog.Info("session up", "remote", plan.Remote, "networks", len(plan.Networks), "dns", plan.DNS.Mode, "transport", state.Transport, "protocols", state.Protocols)
 	stopWatch := watchTransportPath(ctx, addr)
 
 	select {

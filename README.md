@@ -7,8 +7,9 @@ SSH enabled. It is inspired by [sshuttle](https://github.com/sshuttle/sshuttle).
 
 * Tailscale SSH authenticates the remote. The session uploads a helper binary
   for its duration, and the helper deletes its own file at start.
-* A TUN device from wireguard-go and a gVisor netstack capture the TCP and UDP
-  flows on the client.
+* A TUN device from wireguard-go and a gVisor netstack capture the TCP, UDP,
+  and ICMP echo flows on the client, so `ping` and `traceroute` work through
+  the session.
 * The flows run as streams of one QUIC connection to the remote's tailnet
   address, with the BBR congestion controller. The SSH channel with yamux is
   the fallback transport.
@@ -45,7 +46,7 @@ A `go install` build embeds no helper, so it serves the read-only commands only.
 ```
 tj setup
 tj list --path
-tj connect <remote> --dns split
+tj connect <remote> --dns split --protocols tcp,udp,icmp
 tj status
 tj disconnect
 ```

@@ -14,6 +14,7 @@ import (
 	"github.com/evil8io/tailjump/internal/dns"
 	"github.com/evil8io/tailjump/internal/helper"
 	"github.com/evil8io/tailjump/internal/manifest"
+	"github.com/evil8io/tailjump/internal/protocols"
 	"github.com/evil8io/tailjump/internal/session"
 	"github.com/evil8io/tailjump/internal/sshc"
 	"github.com/evil8io/tailjump/internal/transport"
@@ -34,6 +35,7 @@ func newConnectCmd() *cobra.Command {
 	cmd.Flags().String("user", "", "the SSH user")
 	cmd.Flags().String("dns", "", "the DNS mode: none, split, or all")
 	cmd.Flags().String("transport", "", "the data plane transport: auto, quic, or ssh")
+	cmd.Flags().String("protocols", "", "the protocols to forward, a list of tcp, udp, and icmp")
 	cmd.Flags().StringArray("network", nil, "an extra CIDR to route, on top of the manifest and discovery, repeatable")
 	cmd.Flags().StringArray("exclude", nil, "a CIDR to exclude from the session, repeatable")
 	cmd.Flags().Bool("no-discovery", false, "skip discovery")
@@ -45,6 +47,7 @@ func runConnect(cmd *cobra.Command, args []string) error {
 	flagUser, _ := cmd.Flags().GetString("user")
 	dnsFlag, _ := cmd.Flags().GetString("dns")
 	transportFlag, _ := cmd.Flags().GetString("transport")
+	protocolsFlag, _ := cmd.Flags().GetString("protocols")
 	networkFlags, _ := cmd.Flags().GetStringArray("network")
 	excludeFlags, _ := cmd.Flags().GetStringArray("exclude")
 	noDiscovery, _ := cmd.Flags().GetBool("no-discovery")
@@ -55,6 +58,9 @@ func runConnect(cmd *cobra.Command, args []string) error {
 	}
 	if transportFlag != "" && !transport.Valid(transportFlag) {
 		return fmt.Errorf("invalid --transport %q, want auto, quic, or ssh", transportFlag)
+	}
+	if protocolsFlag != "" && !protocols.Valid(protocolsFlag) {
+		return fmt.Errorf("invalid --protocols %q, want a list of tcp, udp, and icmp", protocolsFlag)
 	}
 
 	ctx := cmd.Context()
@@ -73,7 +79,13 @@ func runConnect(cmd *cobra.Command, args []string) error {
 	}
 	defer func() { _ = client.Close() }()
 
-	plan, err := buildPlan(client, rr, cfg, args[0], dnsFlag, transportFlag, networkFlags, excludeFlags, noDiscovery)
+	plan, err := buildPlan(client, rr, cfg, args[0], planFlags{
+		dns:       dnsFlag,
+		transport: transportFlag,
+		protocols: protocolsFlag,
+		networks:  networkFlags,
+		excludes:  excludeFlags,
+	}, noDiscovery)
 	if err != nil {
 		return err
 	}
@@ -87,11 +99,20 @@ func runConnect(cmd *cobra.Command, args []string) error {
 	return err
 }
 
+// planFlags are the connect flags that shape the plan.
+type planFlags struct {
+	dns       string
+	transport string
+	protocols string
+	networks  []string
+	excludes  []string
+}
+
 // buildPlan runs discovery, computes the session networks, resolves the DNS
-// mode, and picks the helper architecture. Discovery always runs, because the
-// helper architecture comes from it; --no-discovery drops only the
-// discovery-sourced networks.
-func buildPlan(client *sshc.Client, rr *resolvedRemote, cfg *config.Config, ref, dnsFlag, transportFlag string, networkFlags, excludeFlags []string, noDiscovery bool) (*session.Plan, error) {
+// mode and the protocol set, and picks the helper architecture. Discovery
+// always runs, because the helper architecture comes from it;
+// --no-discovery drops only the discovery-sourced networks.
+func buildPlan(client *sshc.Client, rr *resolvedRemote, cfg *config.Config, ref string, flags planFlags, noDiscovery bool) (*session.Plan, error) {
 	res, err := runDiscovery(client)
 	if err != nil {
 		return nil, fmt.Errorf("discovery: %w", err)
@@ -108,7 +129,7 @@ func buildPlan(client *sshc.Client, rr *resolvedRemote, cfg *config.Config, ref,
 		}
 	}
 
-	networks, err := connectNetworks(m, res, cfg, rr, networkFlags, excludeFlags, noDiscovery)
+	networks, err := connectNetworks(m, res, cfg, rr, flags.networks, flags.excludes, noDiscovery)
 	if err != nil {
 		return nil, err
 	}
@@ -121,8 +142,15 @@ func buildPlan(client *sshc.Client, rr *resolvedRemote, cfg *config.Config, ref,
 		return nil, err
 	}
 
-	mode, servers, domains, err := resolveDNS(dnsFlag, cfg, ref, m, res)
+	mode, servers, domains, err := resolveDNS(flags.dns, cfg, ref, m, res)
 	if err != nil {
+		return nil, err
+	}
+	set, err := protocols.Resolve(flags.protocols, cfg.Remotes[ref].Protocols, cfg.Defaults.Protocols)
+	if err != nil {
+		return nil, err
+	}
+	if err := checkDNSProtocols(mode, set); err != nil {
 		return nil, err
 	}
 	ports, err := m.QUICPorts()
@@ -133,12 +161,12 @@ func buildPlan(client *sshc.Client, rr *resolvedRemote, cfg *config.Config, ref,
 	if err != nil {
 		return nil, fmt.Errorf("manifest: %w", err)
 	}
-	tmode := transportMode(transportFlag, cfg, ref)
+	tmode := transportMode(flags.transport, cfg, ref)
 	controller, err := controllerKnob()
 	if err != nil {
 		return nil, err
 	}
-	slog.Debug("session networks", "count", len(networks), "networks", prefixStrings(networks), "dns", mode, "transport", tmode)
+	slog.Debug("session networks", "count", len(networks), "networks", prefixStrings(networks), "dns", mode, "transport", tmode, "protocols", set)
 
 	return &session.Plan{
 		Remote:        rr.Peer.HostName,
@@ -152,7 +180,17 @@ func buildPlan(client *sshc.Client, rr *resolvedRemote, cfg *config.Config, ref,
 		BandwidthUp:   up,
 		BandwidthDown: down,
 		Controller:    controller,
+		Protocols:     set.String(),
 	}, nil
+}
+
+// checkDNSProtocols refuses a DNS mode that needs the tunnel when the set
+// has no udp, because the split and all modes send the queries through it.
+func checkDNSProtocols(mode dns.Mode, set protocols.Set) error {
+	if mode == dns.ModeNone || set.UDP {
+		return nil
+	}
+	return fmt.Errorf("--dns %s sends the DNS queries through the tunnel, but the protocol set %q has no udp; use --dns none or add udp", mode, set)
 }
 
 // controllerKnob reads the measurement knob TJ_QUIC_CONTROLLER. Only cubic

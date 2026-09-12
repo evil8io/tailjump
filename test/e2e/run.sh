@@ -2,14 +2,19 @@
 # run.sh drives the tj e2e test against the shared gateway inside a rootless
 # podman rig. It builds tj, builds and starts the rig, connects with --dns
 # none, proves the session runs on the QUIC transport with the helper port
-# bound to the tailnet address only, proves TCP and UDP reach the VPC over
-# IPv4 and IPv6, checks the one-session lock, disconnects, and confirms the
-# remote is clean. It then proves the DNS modes: --dns all against the
-# discovered resolver, and --dns split against a temporary manifest it places
-# on the gateway and removes again. It then blocks the QUIC port range inside
-# the rig and proves the fallback to the SSH transport, and that --transport
-# quic fails without a session. With TJ_TEST_DERP_REF set it also connects
-# once to a DERP-relayed remote on the QUIC transport.
+# bound to the tailnet address only, proves TCP, UDP, and ICMP echo reach the
+# VPC over IPv4 and IPv6, proves traceroute in the UDP and the ICMP mode,
+# checks the one-session lock, disconnects, and confirms the remote is clean.
+# It then proves the DNS modes: --dns all against the discovered resolver,
+# and --dns split against a temporary manifest it places on the gateway and
+# removes again. It then proves the protocol set: a session without icmp
+# gets no echo reply, and a session with tcp only refuses --dns all. It then
+# blocks the QUIC port range inside the rig and proves the fallback to the
+# SSH transport, and that --transport quic fails without a session. With
+# TJ_TEST_DERP_REF set it also connects once to a DERP-relayed remote on the
+# QUIC transport. With TJ_TEST_TRACE_TARGET set it routes that address
+# through a session and proves a Time Exceeded from a hop on the way. It
+# ends with the echo socket line of tj doctor.
 #
 # It never runs tj connect on the host: the host holds its own session and the
 # one-session rule forbids a second. The rig reaches the tailnet through the
@@ -131,6 +136,9 @@ log "build tj (host arch) with the embedded helpers"
 (cd "$ROOT" && task build)
 
 log "probe the gateway VPC endpoints over Tailscale SSH"
+GW_V4="$(gateway_ssh \
+	"ip -4 -br addr show ens5 | awk '{print \$3}' | head -1 | cut -d/ -f1")"
+printf 'gateway VPC IPv4: %s\n' "$GW_V4"
 GW_V6="$(gateway_ssh \
 	"ip -6 -br addr show ens5 scope global | awk '{print \$3}' | head -1 | cut -d/ -f1" || true)"
 if [ -n "$GW_V6" ]; then
@@ -248,6 +256,42 @@ if [ -n "$GW_V6" ]; then
 	else
 		bad "TCP IPv6 to [${GW_V6}]:22"
 	fi
+fi
+
+# The VPC resolver answers no echo request, measured from the gateway itself
+# on 2026-09-12, so the ping targets are the gateway's own VPC addresses.
+log "icmp: ping over IPv4 to the gateway's VPC address ${GW_V4} through the session"
+if rig ping -4 -n -c 3 -W 3 "$GW_V4" | tee >(cat >&2) | grep -q '3 received'; then
+	ok "ping IPv4 to ${GW_V4}: 3 of 3 replies"
+else
+	bad "ping IPv4 to ${GW_V4} lost replies"
+fi
+
+if [ -n "$GW_V6" ]; then
+	log "icmp: ping over IPv6 to the gateway's VPC address ${GW_V6} through the session"
+	if rig ping -6 -n -c 3 -W 3 "$GW_V6" | tee >(cat >&2) | grep -q '3 received'; then
+		ok "ping IPv6 to ${GW_V6}: 3 of 3 replies"
+	else
+		bad "ping IPv6 to ${GW_V6} lost replies"
+	fi
+fi
+
+log "traceroute: udp mode to the gateway's VPC address ${GW_V4}, one hop from the helper"
+TRACE="$(rig traceroute -n -q 1 -m 5 -w 3 "$GW_V4" 2>&1 || true)"
+printf '%s\n' "$TRACE"
+if printf '%s\n' "$TRACE" | grep -qE "^ *1 +${GW_V4//./\\.} "; then
+	ok "udp traceroute reached ${GW_V4} at hop 1"
+else
+	bad "udp traceroute did not reach ${GW_V4} at hop 1"
+fi
+
+log "traceroute: icmp mode to the gateway's VPC address ${GW_V4}, one hop from the helper"
+TRACE="$(rig traceroute -I -n -q 1 -m 5 -w 3 "$GW_V4" 2>&1 || true)"
+printf '%s\n' "$TRACE"
+if printf '%s\n' "$TRACE" | grep -qE "^ *1 +${GW_V4//./\\.} "; then
+	ok "icmp traceroute reached ${GW_V4} at hop 1"
+else
+	bad "icmp traceroute did not reach ${GW_V4} at hop 1"
 fi
 
 log "one-session lock: a second connect must refuse"
@@ -380,6 +424,89 @@ fi
 log "remove the temporary manifest"
 remove_gateway_manifest
 
+log "protocols: tj connect --protocols tcp,udp gets no echo reply, and TCP and DNS still work"
+rig tj -v connect "$TJ_TEST_REF" --user "$TJ_TEST_USER" --dns none --protocols tcp,udp
+if rig tj status | grep -qE '^Protocols:[[:space:]]+tcp,udp$'; then
+	ok "status shows protocols tcp,udp"
+else
+	bad "status does not show protocols tcp,udp"
+	rig tj status
+fi
+if rig ping -4 -n -c 2 -W 2 "$GW_V4" >/dev/null 2>&1; then
+	bad "ping got a reply with icmp disabled"
+else
+	ok "ping gets no reply with icmp disabled"
+fi
+if rig nc -z -w 8 "$TJ_TEST_RESOLVER" 53; then
+	ok "TCP IPv4 to ${TJ_TEST_RESOLVER}:53 with icmp disabled"
+else
+	bad "TCP IPv4 to ${TJ_TEST_RESOLVER}:53 with icmp disabled"
+fi
+if rig dig +time=5 +tries=2 +short "@${TJ_TEST_RESOLVER}" "$TJ_TEST_DNS_NAME" | grep -qE '[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+'; then
+	ok "UDP DNS IPv4 to ${TJ_TEST_RESOLVER} with icmp disabled"
+else
+	bad "UDP DNS IPv4 to ${TJ_TEST_RESOLVER} with icmp disabled"
+fi
+rig tj disconnect
+sleep 2
+
+log "protocols: --protocols tcp refuses --dns all, and comes up with --dns none"
+REFUSED="$(rig tj connect "$TJ_TEST_REF" --user "$TJ_TEST_USER" --dns all --protocols tcp 2>&1 || true)"
+printf '%s\n' "$REFUSED"
+if printf '%s' "$REFUSED" | grep -q 'no udp'; then
+	ok "connect --protocols tcp --dns all refused and named the udp conflict"
+else
+	bad "connect --protocols tcp --dns all did not name the udp conflict"
+fi
+if rig tj status | grep -q "no active session"; then
+	ok "no session after the refused connect"
+else
+	bad "a session exists after the refused connect"
+	rig tj disconnect
+	sleep 2
+fi
+rig tj -v connect "$TJ_TEST_REF" --user "$TJ_TEST_USER" --dns none --protocols tcp
+if rig tj status | grep -qE '^Protocols:[[:space:]]+tcp$'; then
+	ok "status shows protocols tcp"
+else
+	bad "status does not show protocols tcp"
+fi
+if rig nc -z -w 8 "$TJ_TEST_RESOLVER" 53; then
+	ok "TCP IPv4 to ${TJ_TEST_RESOLVER}:53 with tcp only"
+else
+	bad "TCP IPv4 to ${TJ_TEST_RESOLVER}:53 with tcp only"
+fi
+if rig dig +time=2 +tries=1 +short "@${TJ_TEST_RESOLVER}" "$TJ_TEST_DNS_NAME" >/dev/null 2>&1; then
+	bad "UDP DNS got an answer with udp disabled"
+else
+	ok "UDP DNS gets no answer with udp disabled"
+fi
+rig tj disconnect
+sleep 2
+
+if [ -n "${TJ_TEST_TRACE_TARGET:-}" ]; then
+	log "traceroute: time exceeded from a hop on the way to ${TJ_TEST_TRACE_TARGET}, routed through the session"
+	rig tj -v connect "$TJ_TEST_REF" --user "$TJ_TEST_USER" --dns none --network "${TJ_TEST_TRACE_TARGET}/32"
+	TRACE="$(rig traceroute -n -q 1 -m 12 -w 3 "$TJ_TEST_TRACE_TARGET" 2>&1 || true)"
+	printf '%s\n' "$TRACE"
+	HOPS="$(printf '%s\n' "$TRACE" | grep -E '^ *[0-9]+ +[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+ ' | grep -vc " ${TJ_TEST_TRACE_TARGET//./\\.} " || true)"
+	if [ "${HOPS:-0}" -ge 1 ]; then
+		ok "udp traceroute got a time exceeded from ${HOPS} hop(s) on the way"
+	else
+		bad "udp traceroute got no time exceeded on the way to ${TJ_TEST_TRACE_TARGET}"
+	fi
+	TRACE="$(rig traceroute -I -n -q 1 -m 12 -w 3 "$TJ_TEST_TRACE_TARGET" 2>&1 || true)"
+	printf '%s\n' "$TRACE"
+	HOPS="$(printf '%s\n' "$TRACE" | grep -E '^ *[0-9]+ +[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+ ' | grep -vc " ${TJ_TEST_TRACE_TARGET//./\\.} " || true)"
+	if [ "${HOPS:-0}" -ge 1 ]; then
+		ok "icmp traceroute got a time exceeded from ${HOPS} hop(s) on the way"
+	else
+		bad "icmp traceroute got no time exceeded on the way to ${TJ_TEST_TRACE_TARGET}"
+	fi
+	rig tj disconnect
+	sleep 2
+fi
+
 log "fallback: measure two connects on the ssh transport, the smaller one is the baseline"
 SSH_SECONDS=""
 for run in 1 2; do
@@ -497,6 +624,15 @@ if [ -n "${TJ_TEST_DERP_REF:-}" ]; then
 	else
 		bad "relayed remote: not clean: files '${DERP_LEFT}' listeners '${DERP_LISTENERS}'"
 	fi
+fi
+
+log "tj doctor reports the echo socket of the gateway"
+DOCTOR="$(rig tj doctor "$TJ_TEST_REF" --user "$TJ_TEST_USER" 2>/dev/null || true)"
+printf '%s\n' "$DOCTOR"
+if printf '%s\n' "$DOCTOR" | grep -E '^icmp echo socket:' | grep -qE 'raw socket|ping socket'; then
+	ok "doctor shows the echo socket of the gateway"
+else
+	bad "doctor does not show an echo socket for the gateway"
 fi
 
 log "confirm the gateway is clean"

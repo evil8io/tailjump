@@ -120,16 +120,16 @@ func TestLoopbackUDP(t *testing.T) {
 	defer func() { _ = conn.Close() }()
 
 	want := []byte("ping")
-	if err := conn.WriteFrame(want); err != nil {
-		t.Fatalf("WriteFrame: %v", err)
+	if err := conn.WriteDatagram(64, want); err != nil {
+		t.Fatalf("WriteDatagram: %v", err)
 	}
 	_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second))
-	got, err := conn.ReadFrame()
+	got, err := conn.ReadReply()
 	if err != nil {
-		t.Fatalf("ReadFrame: %v", err)
+		t.Fatalf("ReadReply: %v", err)
 	}
-	if !bytes.Equal(got, want) {
-		t.Fatalf("echo = %q, want %q", got, want)
+	if !bytes.Equal(got.Payload, want) {
+		t.Fatalf("echo = %q, want %q", got.Payload, want)
 	}
 }
 
@@ -143,19 +143,19 @@ func TestLoopbackUDPIdleClose(t *testing.T) {
 	}
 	defer func() { _ = conn.Close() }()
 
-	if err := conn.WriteFrame([]byte("ping")); err != nil {
-		t.Fatalf("WriteFrame: %v", err)
+	if err := conn.WriteDatagram(64, []byte("ping")); err != nil {
+		t.Fatalf("WriteDatagram: %v", err)
 	}
 	_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second))
-	if _, err := conn.ReadFrame(); err != nil {
-		t.Fatalf("ReadFrame: %v", err)
+	if _, err := conn.ReadReply(); err != nil {
+		t.Fatalf("ReadReply: %v", err)
 	}
 
 	// After the idle timeout the helper closes the flow, so the next read
 	// returns an end-of-stream error.
 	_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second))
-	if _, err := conn.ReadFrame(); err == nil {
-		t.Fatal("ReadFrame after the idle timeout returned no error, want a closed stream")
+	if _, err := conn.ReadReply(); err == nil {
+		t.Fatal("ReadReply after the idle timeout returned no error, want a closed stream")
 	}
 }
 
@@ -176,5 +176,149 @@ func TestLoopbackQuit(t *testing.T) {
 	case <-client.Wait():
 	case <-time.After(2 * time.Second):
 		t.Fatal("session did not end after quit")
+	}
+}
+
+// echoSkipReason returns the reason to skip an echo test on this host: the
+// test runner has neither CAP_NET_RAW nor a ping socket. The ping socket
+// needs the runner's group inside net.ipv4.ping_group_range.
+func echoSkipReason(t *testing.T, client *Client, dst netip.Addr) string {
+	t.Helper()
+	conn, err := client.DialICMP(dst, 1)
+	if err != nil {
+		t.Fatalf("DialICMP: %v", err)
+	}
+	defer func() { _ = conn.Close() }()
+	_ = conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+	err = conn.ReadStatus()
+	if errors.Is(err, ErrEchoUnsupported) {
+		return "no raw socket and no ping socket for the test runner (ping_group_range " + readPingGroupRange() + ")"
+	}
+	if err != nil {
+		t.Fatalf("ReadStatus: %v", err)
+	}
+	return ""
+}
+
+func TestLoopbackEchoV4(t *testing.T) {
+	testLoopbackEcho(t, netip.MustParseAddr("127.0.0.1"))
+}
+
+func TestLoopbackEchoV6(t *testing.T) {
+	if !hasIPv6Loopback() {
+		t.Skip("no IPv6 loopback on this host")
+	}
+	testLoopbackEcho(t, netip.MustParseAddr("::1"))
+}
+
+// testLoopbackEcho pings the loopback address through the helper and checks
+// that the reply carries the sequence and the payload.
+func testLoopbackEcho(t *testing.T, dst netip.Addr) {
+	client := newLoopback(t, &Server{})
+	if reason := echoSkipReason(t, client, dst); reason != "" {
+		t.Skip(reason)
+	}
+
+	conn, err := client.DialICMP(dst, 0x1234)
+	if err != nil {
+		t.Fatalf("DialICMP: %v", err)
+	}
+	defer func() { _ = conn.Close() }()
+
+	want := []byte("echo over the mux")
+	for seq := uint16(1); seq <= 2; seq++ {
+		if err := conn.WriteRequest(seq, 64, want); err != nil {
+			t.Fatalf("WriteRequest: %v", err)
+		}
+	}
+	_ = conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+	if err := conn.ReadStatus(); err != nil {
+		t.Fatalf("ReadStatus: %v", err)
+	}
+	for seq := uint16(1); seq <= 2; seq++ {
+		_ = conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+		reply, err := conn.ReadReply()
+		if err != nil {
+			t.Fatalf("ReadReply: %v", err)
+		}
+		if reply.Error != nil {
+			t.Fatalf("reply is an icmp error: %+v", *reply.Error)
+		}
+		if reply.Seq != seq || !bytes.Equal(reply.Payload, want) {
+			t.Fatalf("reply = seq %d payload %q, want seq %d payload %q", reply.Seq, reply.Payload, seq, want)
+		}
+	}
+}
+
+func hasIPv6Loopback() bool {
+	ln, err := net.Listen("tcp", "[::1]:0")
+	if err != nil {
+		return false
+	}
+	_ = ln.Close()
+	return true
+}
+
+func TestLoopbackEchoSocketInfo(t *testing.T) {
+	client := newLoopback(t, &Server{})
+	info, err := client.QueryEchoSocket()
+	if err != nil {
+		t.Fatalf("QueryEchoSocket: %v", err)
+	}
+	switch info.Socket {
+	case EchoSocketRaw, EchoSocketPing, EchoSocketNone:
+	default:
+		t.Fatalf("socket = %q", info.Socket)
+	}
+	if info.PingGroupRange == "" {
+		t.Fatal("ping_group_range is empty on Linux")
+	}
+}
+
+// TestLoopbackUDPUnreachable sends a datagram to a closed loopback port. The
+// kernel answers with a Port Unreachable, the helper reads it from the error
+// queue, and the flow returns it as an error frame instead of closing.
+func TestLoopbackUDPUnreachable(t *testing.T) {
+	pc, err := net.ListenPacket("udp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dst := pc.LocalAddr().(*net.UDPAddr).AddrPort()
+	_ = pc.Close()
+
+	client := newLoopback(t, &Server{})
+	conn, err := client.DialUDP(dst)
+	if err != nil {
+		t.Fatalf("DialUDP: %v", err)
+	}
+	defer func() { _ = conn.Close() }()
+
+	if err := conn.WriteDatagram(64, []byte("probe")); err != nil {
+		t.Fatalf("WriteDatagram: %v", err)
+	}
+	_ = conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+	reply, err := conn.ReadReply()
+	if err != nil {
+		t.Fatalf("ReadReply: %v", err)
+	}
+	if reply.Error == nil {
+		t.Fatalf("reply = %+v, want an icmp error", reply)
+	}
+	e := *reply.Error
+	if e.Type != 3 || e.Code != 3 || e.From != netip.MustParseAddr("127.0.0.1") {
+		t.Fatalf("icmp error = type %d code %d from %s, want port unreachable from 127.0.0.1", e.Type, e.Code, e.From)
+	}
+	if !bytes.Equal(e.Inner, []byte("probe")) {
+		t.Fatalf("quoted payload = %q, want the datagram", e.Inner)
+	}
+
+	// The flow is still open: a second probe gets a second error.
+	if err := conn.WriteDatagram(64, []byte("again")); err != nil {
+		t.Fatalf("second WriteDatagram: %v", err)
+	}
+	_ = conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+	reply, err = conn.ReadReply()
+	if err != nil || reply.Error == nil {
+		t.Fatalf("second ReadReply = %+v %v, want an icmp error", reply, err)
 	}
 }

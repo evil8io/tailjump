@@ -12,7 +12,7 @@ tailjump, binary `tj`, gives an engineer a session into a remote network over Ta
 4. Never leave a file on a remote. After a test, check with `ssh root@100.64.0.10 'ls -la /root/.cache/tj /run/user/0 2>&1'`.
 5. Add a comment only when the code cannot explain itself. Keep it short. No em dashes.
 6. Docs, commit messages, and PR bodies use plain verbs and complete sentences. No metaphors, no em dashes.
-7. `cmd/tjhelper` imports no package that imports `tailscale.com`, cobra, gvisor, or `log/slog`. It may import the quic-go fork `github.com/apernet/quic-go`, `crypto/tls`, and `internal/congestion`; `encoding/json` enters the helper graph through the fork. Each helper binary stays under 8 MiB, and `task helpers` fails above that.
+7. `cmd/tjhelper` imports no package that imports `tailscale.com`, cobra, gvisor, or `log/slog`. It may import the quic-go fork `github.com/apernet/quic-go`, `crypto/tls`, `golang.org/x/sys/unix`, and `internal/congestion`; `encoding/json` enters the helper graph through the fork. Each helper binary stays under 8 MiB, and `task helpers` fails above that.
 8. Run `task lint` and `task test` before a commit.
 
 ## Tools

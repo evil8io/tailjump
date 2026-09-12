@@ -12,6 +12,7 @@ import (
 	"github.com/evil8io/tailjump/internal/config"
 	"github.com/evil8io/tailjump/internal/dns"
 	"github.com/evil8io/tailjump/internal/manifest"
+	"github.com/evil8io/tailjump/internal/protocols"
 	"github.com/evil8io/tailjump/internal/transport"
 )
 
@@ -49,15 +50,16 @@ func newRemoteListCmd() *cobra.Command {
 				return json.NewEncoder(cmd.OutOrStdout()).Encode(cfg.Remotes)
 			}
 			w := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 4, 2, ' ', 0)
-			_, _ = fmt.Fprintln(w, "ALIAS\tHOST\tUSER\tDNS\tTRANSPORT\tNETWORKS\tEXCLUDE")
+			_, _ = fmt.Fprintln(w, "ALIAS\tHOST\tUSER\tDNS\tTRANSPORT\tPROTOCOLS\tNETWORKS\tEXCLUDE")
 			for _, alias := range sortedRemoteAliases(cfg) {
 				rc := cfg.Remotes[alias]
-				_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+				_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
 					alias,
 					valueOrDash(rc.Host),
 					valueOrDash(rc.User),
 					valueOrDash(rc.DNS),
 					valueOrDash(rc.Transport),
+					valueOrDash(rc.Protocols),
 					joinOrDash(rc.Networks),
 					joinOrDash(rc.Exclude),
 				)
@@ -93,6 +95,7 @@ func newRemoteShowCmd() *cobra.Command {
 			_, _ = fmt.Fprintf(w, "User:\t%s\n", valueOrDash(rc.User))
 			_, _ = fmt.Fprintf(w, "DNS:\t%s\n", valueOrDash(rc.DNS))
 			_, _ = fmt.Fprintf(w, "Transport:\t%s\n", valueOrDash(rc.Transport))
+			_, _ = fmt.Fprintf(w, "Protocols:\t%s\n", valueOrDash(rc.Protocols))
 			_, _ = fmt.Fprintf(w, "Networks:\t%s\n", joinOrDash(rc.Networks))
 			_, _ = fmt.Fprintf(w, "Exclude:\t%s\n", joinOrDash(rc.Exclude))
 			return w.Flush()
@@ -200,13 +203,15 @@ func addRemoteFlags(cmd *cobra.Command) {
 	cmd.Flags().String("user", "", "the SSH user")
 	cmd.Flags().String("dns", "", "the DNS mode: none, split, or all")
 	cmd.Flags().String("transport", "", "the data plane transport: auto, quic, or ssh")
+	cmd.Flags().String("protocols", "", "the protocols to forward, a list of tcp, udp, and icmp")
 	cmd.Flags().StringArray("network", nil, "a CIDR to route for this remote, repeatable")
 	cmd.Flags().StringArray("exclude", nil, "a CIDR to exclude for this remote, repeatable")
 }
 
 // remoteFromFlags returns base with the fields whose flags were set on cmd
-// overwritten. It validates the DNS mode and every CIDR before it returns,
-// so a bad value fails before the config is written.
+// overwritten. It validates the DNS mode, the transport, the protocol set,
+// and every CIDR before it returns, so a bad value fails before the config
+// is written.
 func remoteFromFlags(cmd *cobra.Command, base config.RemoteConfig) (config.RemoteConfig, error) {
 	rc := base
 	f := cmd.Flags()
@@ -229,6 +234,13 @@ func remoteFromFlags(cmd *cobra.Command, base config.RemoteConfig) (config.Remot
 			return rc, fmt.Errorf("invalid --transport %q, want auto, quic, or ssh", v)
 		}
 		rc.Transport = v
+	}
+	if f.Changed("protocols") {
+		v, _ := f.GetString("protocols")
+		if !protocols.Valid(v) {
+			return rc, fmt.Errorf("invalid --protocols %q, want a list of tcp, udp, and icmp", v)
+		}
+		rc.Protocols = v
 	}
 	if f.Changed("network") {
 		v, _ := f.GetStringArray("network")
