@@ -153,6 +153,16 @@ assert_clean() {
 		bad "$label: a dev tj0 route remains"
 		rig sh -c 'ip route show; ip -6 route show' | grep 'dev tj0' || true
 	fi
+	if rig ip rule show | grep -q 'lookup 117' || rig ip -6 rule show | grep -q 'lookup 117'; then
+		bad "$label: a session rule remains"
+	else
+		ok "$label: no session rule remains"
+	fi
+	if [ -z "$(rig ip route show table 117 2>/dev/null)$(rig ip -6 route show table 117 2>/dev/null)" ]; then
+		ok "$label: the session table is empty"
+	else
+		bad "$label: the session table still has routes"
+	fi
 	if no_runtime_files; then
 		ok "$label: no local runtime file remains"
 	else

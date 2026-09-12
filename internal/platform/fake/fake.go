@@ -55,6 +55,8 @@ func (d *Device) Delete(name string) error {
 type Router struct {
 	AddCalls    []RouteCall
 	RemoveCalls []RouteCall
+	ResetCalls  int
+	ResetErr    error
 
 	AddErr    error
 	RemoveErr error
@@ -82,6 +84,11 @@ func (r *Router) Remove(device string, prefixes []netip.Prefix) error {
 func (r *Router) Connected() ([]netip.Prefix, error) {
 	r.ConnectedCalls++
 	return r.ConnectedValue, r.ConnectedErr
+}
+
+func (r *Router) Reset() error {
+	r.ResetCalls++
+	return r.ResetErr
 }
 
 // Resolver is a fake platform.Resolver.

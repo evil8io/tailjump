@@ -25,6 +25,11 @@ func (r *Router) Remove(device string, prefixes []netip.Prefix) error {
 	return r.change("delete", device, prefixes)
 }
 
+// Reset is a no-op: the routes are in the main table, and a utun delete
+// removes them. tailscaled on macOS binds its sockets to the default
+// interface, so the main table cannot capture its packets.
+func (r *Router) Reset() error { return nil }
+
 func (r *Router) change(verb, device string, prefixes []netip.Prefix) error {
 	for _, p := range prefixes {
 		if err := runCommand("route", routeArgs(verb, device, p)...); err != nil {

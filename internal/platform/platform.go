@@ -23,6 +23,9 @@ type Device interface {
 type Router interface {
 	Add(device string, prefixes []netip.Prefix) error
 	Remove(device string, prefixes []netip.Prefix) error
+	// Reset removes every session route and rule that Add installed,
+	// whether or not the device still exists. It is safe to call twice.
+	Reset() error
 	// Connected returns the connected subnets of the client,
 	// without the loopback and without the tj device.
 	Connected() ([]netip.Prefix, error)
