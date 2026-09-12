@@ -26,6 +26,9 @@ type Plan struct {
 	// zero for BBR.
 	BandwidthUp   uint64 `json:"bandwidth_up"`
 	BandwidthDown uint64 `json:"bandwidth_down"`
+	// Controller overrides the controller rule on both sides. Only cubic is
+	// valid, as a measurement knob; empty means the rule.
+	Controller string `json:"controller,omitempty"`
 }
 
 // Session status values in the state file.

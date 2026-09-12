@@ -18,17 +18,23 @@ import (
 // quicConfig is the QUIC configuration of both sides. The packet size and
 // the disabled path MTU discovery are mandatory: the tailnet path MTU is
 // 1280, and spike 5 measured that the library default of 1280 bytes of
-// payload completes no handshake at all.
+// payload completes no handshake at all. The receive windows start at their
+// maximum, as Hysteria2 does; spike 6 measured 22% to 55% more throughput
+// under 7% loss against the library defaults.
 func quicConfig() *quic.Config {
 	return &quic.Config{
-		MaxIdleTimeout:          quicIdleTimeout,
-		KeepAlivePeriod:         quicKeepAlive,
-		InitialPacketSize:       quicPacketSize,
-		DisablePathMTUDiscovery: true,
-		MaxIncomingStreams:      quicMaxStreams,
-		MaxIncomingUniStreams:   quicMaxStreams,
-		Allow0RTT:               false,
-		EnableDatagrams:         false,
+		MaxIdleTimeout:                 quicIdleTimeout,
+		KeepAlivePeriod:                quicKeepAlive,
+		InitialPacketSize:              quicPacketSize,
+		DisablePathMTUDiscovery:        true,
+		MaxIncomingStreams:             quicMaxStreams,
+		MaxIncomingUniStreams:          quicMaxStreams,
+		Allow0RTT:                      false,
+		EnableDatagrams:                false,
+		InitialStreamReceiveWindow:     quicStreamWindow,
+		MaxStreamReceiveWindow:         quicStreamWindow,
+		InitialConnectionReceiveWindow: quicConnWindow,
+		MaxConnectionReceiveWindow:     quicConnWindow,
 	}
 }
 

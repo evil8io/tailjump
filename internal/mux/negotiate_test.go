@@ -41,7 +41,7 @@ func TestParseQUICRequestErrors(t *testing.T) {
 		{"100.64.0.10", "7443-7452", "bbr"},
 		{"gw.example", "7443-7452", "bbr", testFP},
 		{"100.64.0.10", "7452-7443", "bbr", testFP},
-		{"100.64.0.10", "7443-7452", "cubic", testFP},
+		{"100.64.0.10", "7443-7452", "reno", testFP},
 		{"100.64.0.10", "7443-7452", "bbr", "sha256:short"},
 		{"100.64.0.10", "7443-7452", "bbr", "md5:" + testFP[7:]},
 	}

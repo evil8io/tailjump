@@ -133,6 +133,10 @@ func buildPlan(client *sshc.Client, rr *resolvedRemote, cfg *config.Config, ref,
 		return nil, fmt.Errorf("manifest: %w", err)
 	}
 	tmode := transportMode(transportFlag, cfg, ref)
+	controller, err := controllerKnob()
+	if err != nil {
+		return nil, err
+	}
 	slog.Debug("session networks", "count", len(networks), "networks", prefixStrings(networks), "dns", mode, "transport", tmode)
 
 	return &session.Plan{
@@ -146,7 +150,21 @@ func buildPlan(client *sshc.Client, rr *resolvedRemote, cfg *config.Config, ref,
 		QUICPorts:     ports.String(),
 		BandwidthUp:   up,
 		BandwidthDown: down,
+		Controller:    controller,
 	}, nil
+}
+
+// controllerKnob reads the measurement knob TJ_QUIC_CONTROLLER. Only cubic
+// is valid; it selects the library default on both sides for a comparison
+// run. See docs/architecture.md, "Testing".
+func controllerKnob() (string, error) {
+	v := os.Getenv("TJ_QUIC_CONTROLLER")
+	switch v {
+	case "", transport.Cubic:
+		return v, nil
+	default:
+		return "", fmt.Errorf("invalid TJ_QUIC_CONTROLLER %q, want cubic or unset", v)
+	}
 }
 
 // transportMode picks the transport by precedence: the flag, then the remote

@@ -29,7 +29,9 @@ func selectTransport(ctx context.Context, muxClient *mux.Client, addr netip.Addr
 	if err != nil {
 		return nil, err
 	}
-	q, reason, err := dialQUIC(ctx, muxClient, addr, ports, plan.BandwidthUp, plan.BandwidthDown)
+	clientCtl := transport.ControllerNamed(plan.Controller, plan.BandwidthUp)
+	helperCtl := transport.ControllerNamed(plan.Controller, plan.BandwidthDown)
+	q, reason, err := dialQUIC(ctx, muxClient, addr, ports, clientCtl, helperCtl)
 	if err != nil {
 		return nil, err
 	}
@@ -60,7 +62,7 @@ func policyHint(ports transport.PortRange, remote string) string {
 // helper that cannot listen, or a handshake that does not complete within
 // the timeout, returns a nil client with the reason; that is the fallback
 // case, not an error.
-func dialQUIC(ctx context.Context, muxClient *mux.Client, addr netip.Addr, ports transport.PortRange, up, down uint64) (*mux.QUICClient, string, error) {
+func dialQUIC(ctx context.Context, muxClient *mux.Client, addr netip.Addr, ports transport.PortRange, clientCtl, helperCtl transport.Controller) (*mux.QUICClient, string, error) {
 	cert, fp, err := mux.NewClientCertificate()
 	if err != nil {
 		return nil, "", fmt.Errorf("quic client certificate: %w", err)
@@ -68,7 +70,7 @@ func dialQUIC(ctx context.Context, muxClient *mux.Client, addr netip.Addr, ports
 	reply, err := muxClient.NegotiateQUIC(mux.QUICRequest{
 		BindAddr:    addr,
 		Ports:       ports,
-		Controller:  transport.ControllerFor(down),
+		Controller:  helperCtl,
 		Fingerprint: fp,
 	})
 	var unavailable *mux.UnavailableError
@@ -78,7 +80,7 @@ func dialQUIC(ctx context.Context, muxClient *mux.Client, addr netip.Addr, ports
 	if err != nil {
 		return nil, "", err
 	}
-	q, err := mux.DialQUIC(ctx, netip.AddrPortFrom(addr, reply.Port), cert, reply.Fingerprint, transport.ControllerFor(up))
+	q, err := mux.DialQUIC(ctx, netip.AddrPortFrom(addr, reply.Port), cert, reply.Fingerprint, clientCtl)
 	if err != nil {
 		if aerr := muxClient.AbandonQUIC(); aerr != nil {
 			slog.Debug("abandon quic", "error", aerr)
@@ -109,7 +111,7 @@ func ProbeQUIC(ctx context.Context, client *sshc.Client, arch string, addr netip
 	}
 	defer func() { _ = muxClient.Close() }()
 	defer func() { _ = muxClient.Quit() }()
-	q, reason, err := dialQUIC(ctx, muxClient, addr, ports, up, down)
+	q, reason, err := dialQUIC(ctx, muxClient, addr, ports, transport.ControllerFor(up), transport.ControllerFor(down))
 	if err != nil {
 		return 0, err
 	}

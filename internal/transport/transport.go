@@ -138,10 +138,12 @@ type Controller struct {
 	Bps  uint64
 }
 
-// The controller names.
+// The controller names. Cubic is the library default and exists as a
+// measurement knob only; see docs/architecture.md, "Testing".
 const (
 	BBR    = "bbr"
 	Brutal = "brutal"
+	Cubic  = "cubic"
 )
 
 // ControllerFor returns Brutal at the rate when it is set, otherwise BBR.
@@ -152,13 +154,26 @@ func ControllerFor(bytesPerSecond uint64) Controller {
 	return Controller{Name: BBR}
 }
 
-// String formats the controller for the control line: "bbr" or
+// ControllerNamed returns the named controller when the name is cubic, and
+// otherwise the rule of ControllerFor.
+func ControllerNamed(name string, bytesPerSecond uint64) Controller {
+	if name == Cubic {
+		return Controller{Name: Cubic}
+	}
+	return ControllerFor(bytesPerSecond)
+}
+
+// String formats the controller for the control line: "bbr", "cubic", or
 // "brutal=<bytes-per-second>".
 func (c Controller) String() string {
-	if c.Name == Brutal {
+	switch c.Name {
+	case Brutal:
 		return fmt.Sprintf("%s=%d", Brutal, c.Bps)
+	case Cubic:
+		return Cubic
+	default:
+		return BBR
 	}
-	return BBR
 }
 
 // ParseController reverses String.
@@ -167,6 +182,8 @@ func ParseController(s string) (Controller, error) {
 	switch {
 	case name == BBR && !found:
 		return Controller{Name: BBR}, nil
+	case name == Cubic && !found:
+		return Controller{Name: Cubic}, nil
 	case name == Brutal && found:
 		bps, err := strconv.ParseUint(rate, 10, 64)
 		if err != nil || bps == 0 {
@@ -174,5 +191,5 @@ func ParseController(s string) (Controller, error) {
 		}
 		return Controller{Name: Brutal, Bps: bps}, nil
 	}
-	return Controller{}, errors.New("controller " + strconv.Quote(s) + ": want bbr or brutal=<bytes-per-second>")
+	return Controller{}, errors.New("controller " + strconv.Quote(s) + ": want bbr, cubic, or brutal=<bytes-per-second>")
 }

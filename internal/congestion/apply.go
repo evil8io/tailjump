@@ -31,6 +31,8 @@ func Apply(conn *quic.Conn, ctl transport.Controller) error {
 		}
 		conn.SetCongestionControl(brutal.NewBrutalSender(ctl.Bps, false))
 		return nil
+	case transport.Cubic:
+		return nil
 	default:
 		return fmt.Errorf("congestion: unknown controller %q", ctl.Name)
 	}

@@ -74,7 +74,7 @@ func TestController(t *testing.T) {
 	if got := ControllerFor(2_500_000); got.String() != "brutal=2500000" {
 		t.Fatalf("ControllerFor(2500000) = %q", got)
 	}
-	for _, s := range []string{"bbr", "brutal=2500000"} {
+	for _, s := range []string{"bbr", "cubic", "brutal=2500000"} {
 		c, err := ParseController(s)
 		if err != nil {
 			t.Fatalf("ParseController(%q): %v", s, err)
@@ -83,7 +83,7 @@ func TestController(t *testing.T) {
 			t.Fatalf("round trip %q = %q", s, c)
 		}
 	}
-	for _, s := range []string{"", "cubic", "brutal", "brutal=0", "brutal=x", "bbr=1"} {
+	for _, s := range []string{"", "reno", "brutal", "brutal=0", "brutal=x", "bbr=1", "cubic=1"} {
 		if _, err := ParseController(s); err == nil {
 			t.Fatalf("ParseController(%q) returned no error", s)
 		}
