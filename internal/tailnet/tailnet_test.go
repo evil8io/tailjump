@@ -36,7 +36,7 @@ func startFakeLocalAPI(t *testing.T, body string) string {
 		case "100.64.0.2":
 			_, _ = w.Write([]byte(`{"Endpoint":"[2001:db8::2]:41641","DERPRegionCode":"","LatencySeconds":0.029}`))
 		case "100.64.0.3":
-			_, _ = w.Write([]byte(`{"Endpoint":"","DERPRegionCode":"lhr","LatencySeconds":0.027}`))
+			_, _ = w.Write([]byte(`{"Endpoint":"","DERPRegionCode":"xyz","LatencySeconds":0.027}`))
 		default:
 			_, _ = w.Write([]byte(`{"Err":"no such peer"}`))
 		}
@@ -133,9 +133,9 @@ func TestStatusPathFields(t *testing.T) {
 	sock := startFakeLocalAPI(t, `{
 		"Self": {"HostName":"client","Online":true,"TailscaleIPs":["100.64.0.1"]},
 		"Peer": {
-			"nodekey:a": {"HostName":"direct","Online":true,"Active":true,"CurAddr":"[2001:db8::2]:41641","Relay":"lhr","TailscaleIPs":["100.64.0.2"]},
-			"nodekey:b": {"HostName":"relayed","Online":true,"Active":true,"CurAddr":"","Relay":"lhr","TailscaleIPs":["100.64.0.3"]},
-			"nodekey:c": {"HostName":"idle","Online":true,"Active":false,"CurAddr":"","Relay":"lhr","TailscaleIPs":["100.64.0.4"]}
+			"nodekey:a": {"HostName":"direct","Online":true,"Active":true,"CurAddr":"[2001:db8::2]:41641","Relay":"xyz","TailscaleIPs":["100.64.0.2"]},
+			"nodekey:b": {"HostName":"relayed","Online":true,"Active":true,"CurAddr":"","Relay":"xyz","TailscaleIPs":["100.64.0.3"]},
+			"nodekey:c": {"HostName":"idle","Online":true,"Active":false,"CurAddr":"","Relay":"xyz","TailscaleIPs":["100.64.0.4"]}
 		}
 	}`)
 	st, err := New(sock).Status(context.Background())
@@ -145,15 +145,15 @@ func TestStatusPathFields(t *testing.T) {
 	for _, p := range st.Peers {
 		switch p.HostName {
 		case "direct":
-			if !p.Active || p.CurAddr != "[2001:db8::2]:41641" || p.Relay != "lhr" {
+			if !p.Active || p.CurAddr != "[2001:db8::2]:41641" || p.Relay != "xyz" {
 				t.Errorf("direct peer: %+v", p)
 			}
 		case "relayed":
-			if !p.Active || p.CurAddr != "" || p.Relay != "lhr" {
+			if !p.Active || p.CurAddr != "" || p.Relay != "xyz" {
 				t.Errorf("relayed peer: %+v", p)
 			}
 		case "idle":
-			if p.Active || p.CurAddr != "" || p.Relay != "lhr" {
+			if p.Active || p.CurAddr != "" || p.Relay != "xyz" {
 				t.Errorf("idle peer: %+v", p)
 			}
 		}
@@ -177,7 +177,7 @@ func TestPing(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Ping relayed: %v", err)
 	}
-	if r.Direct() || r.DERPRegionCode != "lhr" || r.Latency != 27*time.Millisecond {
+	if r.Direct() || r.DERPRegionCode != "xyz" || r.Latency != 27*time.Millisecond {
 		t.Errorf("relayed result: %+v", r)
 	}
 
