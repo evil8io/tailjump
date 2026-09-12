@@ -70,10 +70,10 @@ remote_quic_listeners() {
 }
 
 # remote_helper_count prints the number of tj-helper processes on a remote.
-# The bracket in the pattern keeps the ssh command's own process from
-# matching itself.
+# The anchor keeps the tailscaled ssh incubator, whose command line quotes
+# the exec command, and the ssh command's own shell from matching.
 remote_helper_count() {
-	ssh "${SSH_OPTS[@]}" "root@$1" "pgrep -fc '[t]j-helper\.'" 2>/dev/null || true
+	ssh "${SSH_OPTS[@]}" "root@$1" "pgrep -fc '^/[^ ]*/tj-helper\.'" 2>/dev/null || true
 }
 
 cleanup() {
