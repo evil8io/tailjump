@@ -3,10 +3,13 @@
 package manifest
 
 import (
+	"errors"
 	"fmt"
 	"net/netip"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/evil8io/tailjump/internal/transport"
 )
 
 // Manifest is the schema version 1 document that a remote advertises.
@@ -19,6 +22,21 @@ type Manifest struct {
 	Exclude     []string   `yaml:"exclude"`
 	DNS         *DNS       `yaml:"dns"`
 	Checks      []Check    `yaml:"checks"`
+	Transport   *Transport `yaml:"transport"`
+}
+
+// Transport holds the QUIC transport settings of a remote. An absent section
+// means the default port range and the BBR controller.
+type Transport struct {
+	QUICPorts string     `yaml:"quic_ports"`
+	Bandwidth *Bandwidth `yaml:"bandwidth"`
+}
+
+// Bandwidth selects the Brutal controller at the given rates. Up is the rate
+// from the client to the remote, down the rate from the remote to the client.
+type Bandwidth struct {
+	Up   string `yaml:"up"`
+	Down string `yaml:"down"`
 }
 
 // Discovery turns discovery sources on or off. An absent section means all on.
@@ -48,7 +66,45 @@ func Parse(b []byte) (*Manifest, error) {
 	if m.Version != 1 {
 		return nil, fmt.Errorf("unsupported manifest version %d, want 1", m.Version)
 	}
+	if _, err := m.QUICPorts(); err != nil {
+		return nil, err
+	}
+	if _, _, err := m.Bandwidth(); err != nil {
+		return nil, err
+	}
 	return &m, nil
+}
+
+// QUICPorts returns the port range the helper listens in, the default when
+// the manifest sets none.
+func (m *Manifest) QUICPorts() (transport.PortRange, error) {
+	if m.Transport == nil || m.Transport.QUICPorts == "" {
+		return transport.DefaultPorts, nil
+	}
+	r, err := transport.ParsePortRange(m.Transport.QUICPorts)
+	if err != nil {
+		return transport.PortRange{}, fmt.Errorf("transport.quic_ports: %w", err)
+	}
+	return r, nil
+}
+
+// Bandwidth returns the Brutal rates in bytes per second, up and down, and
+// zero for both when the manifest sets no bandwidth.
+func (m *Manifest) Bandwidth() (up, down uint64, err error) {
+	if m.Transport == nil || m.Transport.Bandwidth == nil {
+		return 0, 0, nil
+	}
+	b := m.Transport.Bandwidth
+	if b.Up == "" || b.Down == "" {
+		return 0, 0, errors.New("transport.bandwidth needs both up and down")
+	}
+	if up, err = transport.ParseRate(b.Up); err != nil {
+		return 0, 0, fmt.Errorf("transport.bandwidth.up: %w", err)
+	}
+	if down, err = transport.ParseRate(b.Down); err != nil {
+		return 0, 0, fmt.Errorf("transport.bandwidth.down: %w", err)
+	}
+	return up, down, nil
 }
 
 // Empty returns a manifest that stands for a remote with no manifest file.

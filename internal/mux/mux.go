@@ -1,9 +1,11 @@
 // Package mux is the client side and the helper side of the tj mux protocol.
-// The transport is the helper's stdin and stdout. The helper writes the line
-// TJ1 at start, then both sides run yamux over the transport. The client opens
-// every stream: a control stream, one stream per TCP connection, and one
-// stream per UDP flow. This package imports yamux and the standard library
-// only, so the helper that embeds it stays small.
+// The SSH transport is the helper's stdin and stdout. The helper writes the
+// line TJ2 at start, then both sides run yamux over the transport. The client
+// opens every stream: a control stream, one stream per TCP connection, and
+// one stream per UDP flow. The control stream negotiates the QUIC transport,
+// and the flows then run as QUIC streams with the same wire format. This
+// package imports yamux, the quic-go fork, and the standard library only, so
+// the helper that embeds it stays small.
 package mux
 
 import (
@@ -27,6 +29,7 @@ const (
 	kindControl byte = 0
 	kindTCP     byte = 1
 	kindUDP     byte = 2
+	kindProbe   byte = 3
 )
 
 // Dial status, the helper's reply on a TCP or UDP stream.
@@ -39,7 +42,7 @@ const (
 )
 
 // handshakeLine is the line the helper writes to the transport at start.
-const handshakeLine = "TJ1"
+const handshakeLine = "TJ2"
 
 const (
 	handshakeTimeout = 10 * time.Second
@@ -55,6 +58,23 @@ const (
 
 	maxLineLen  = 4096
 	maxUDPFrame = 0xffff
+
+	quicALPN             = "tj/2"
+	quicHandshakeTimeout = 5 * time.Second
+	quicReplyTimeout     = 15 * time.Second
+	quicIdleTimeout      = 30 * time.Second
+	quicKeepAlive        = 10 * time.Second
+	quicPacketSize       = 1232
+	quicMaxStreams       = 1 << 16
+	quicOpenTimeout      = 10 * time.Second
+)
+
+// Control stream verbs.
+const (
+	verbQuit        = "quit"
+	verbQUIC        = "quic"
+	verbUnavailable = "quic-unavailable"
+	verbAbandon     = "quic-abandon"
 )
 
 // Errors a client Dial returns for a non-zero helper status.

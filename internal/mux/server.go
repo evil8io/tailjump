@@ -6,6 +6,7 @@ import (
 	"io"
 	"net"
 	"net/netip"
+	"strings"
 	"sync"
 	"time"
 
@@ -29,6 +30,9 @@ type Server struct {
 
 	// LogW receives one line per dial error. A nil LogW disables logging.
 	LogW io.Writer
+
+	quicMu sync.Mutex
+	quic   *quicServer
 }
 
 // Serve writes the handshake, runs the mux over the transport, and returns
@@ -42,6 +46,7 @@ func (s *Server) Serve(transport io.ReadWriteCloser) error {
 		return err
 	}
 	defer func() { _ = sess.Close() }()
+	defer s.stopQUIC()
 
 	done := make(chan struct{})
 	var once sync.Once
@@ -86,6 +91,36 @@ func (s *Server) handle(stream Stream, stop func()) {
 	}
 }
 
+// handleFlow serves a stream of the QUIC transport. The control stream stays
+// on the SSH transport, so kind 0 is refused here.
+func (s *Server) handleFlow(stream Stream) {
+	var kind [1]byte
+	if _, err := io.ReadFull(stream, kind[:]); err != nil {
+		_ = stream.Close()
+		return
+	}
+	switch kind[0] {
+	case kindTCP:
+		s.handleTCP(stream)
+	case kindUDP:
+		s.handleUDP(stream)
+	case kindProbe:
+		s.handleProbe(stream)
+	default:
+		_ = stream.Close()
+	}
+}
+
+// handleProbe answers the client's probe stream with the ok status. The
+// client sends it right after the QUIC handshake, because TLS 1.3 lets the
+// client finish before the helper has verified the client certificate, so
+// only an answered probe proves that the helper accepted the connection.
+func (s *Server) handleProbe(stream Stream) {
+	_, _ = stream.Write([]byte{statusOK})
+	_ = stream.Close()
+	_ = stream.Close()
+}
+
 func (s *Server) handleControl(stream Stream, stop func()) {
 	defer func() { _ = stream.Close() }()
 	if _, err := stream.Write(s.Info.encode()); err != nil {
@@ -96,11 +131,38 @@ func (s *Server) handleControl(stream Stream, stop func()) {
 		if err != nil {
 			return
 		}
-		if line == "quit" {
+		fields := strings.Fields(line)
+		if len(fields) == 0 {
+			continue
+		}
+		switch fields[0] {
+		case verbQuit:
+			s.stopQUIC()
 			stop()
 			return
+		case verbQUIC:
+			if _, err := stream.Write(s.answerQUIC(fields[1:])); err != nil {
+				return
+			}
+		case verbAbandon:
+			s.stopQUIC()
 		}
 	}
+}
+
+// answerQUIC starts the listener for a quic request and returns the reply
+// line, or the unavailable line with the reason.
+func (s *Server) answerQUIC(fields []string) []byte {
+	req, err := parseQUICRequest(fields)
+	if err != nil {
+		return encodeUnavailable(err.Error())
+	}
+	reply, err := s.startQUIC(req)
+	if err != nil {
+		s.logf("quic listener: %v", err)
+		return encodeUnavailable(err.Error())
+	}
+	return reply.encode()
 }
 
 func (s *Server) handleTCP(stream Stream) {

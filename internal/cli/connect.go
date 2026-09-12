@@ -16,6 +16,7 @@ import (
 	"github.com/evil8io/tailjump/internal/manifest"
 	"github.com/evil8io/tailjump/internal/session"
 	"github.com/evil8io/tailjump/internal/sshc"
+	"github.com/evil8io/tailjump/internal/transport"
 )
 
 // exitActiveSession is the exit code connect returns when a session is
@@ -31,6 +32,7 @@ func newConnectCmd() *cobra.Command {
 	}
 	cmd.Flags().String("user", "", "the SSH user")
 	cmd.Flags().String("dns", "", "the DNS mode: none, split, or all")
+	cmd.Flags().String("transport", "", "the data plane transport: auto, quic, or ssh")
 	cmd.Flags().StringArray("network", nil, "an extra CIDR to route, on top of the manifest and discovery, repeatable")
 	cmd.Flags().StringArray("exclude", nil, "a CIDR to exclude from the session, repeatable")
 	cmd.Flags().Bool("no-discovery", false, "skip discovery")
@@ -41,6 +43,7 @@ func newConnectCmd() *cobra.Command {
 func runConnect(cmd *cobra.Command, args []string) error {
 	flagUser, _ := cmd.Flags().GetString("user")
 	dnsFlag, _ := cmd.Flags().GetString("dns")
+	transportFlag, _ := cmd.Flags().GetString("transport")
 	networkFlags, _ := cmd.Flags().GetStringArray("network")
 	excludeFlags, _ := cmd.Flags().GetStringArray("exclude")
 	noDiscovery, _ := cmd.Flags().GetBool("no-discovery")
@@ -48,6 +51,9 @@ func runConnect(cmd *cobra.Command, args []string) error {
 
 	if dnsFlag != "" && !dns.Valid(dnsFlag) {
 		return fmt.Errorf("invalid --dns %q, want none, split, or all", dnsFlag)
+	}
+	if transportFlag != "" && !transport.Valid(transportFlag) {
+		return fmt.Errorf("invalid --transport %q, want auto, quic, or ssh", transportFlag)
 	}
 
 	ctx := cmd.Context()
@@ -66,7 +72,7 @@ func runConnect(cmd *cobra.Command, args []string) error {
 	}
 	defer func() { _ = client.Close() }()
 
-	plan, err := buildPlan(client, rr, cfg, args[0], dnsFlag, networkFlags, excludeFlags, noDiscovery)
+	plan, err := buildPlan(client, rr, cfg, args[0], dnsFlag, transportFlag, networkFlags, excludeFlags, noDiscovery)
 	if err != nil {
 		return err
 	}
@@ -84,7 +90,7 @@ func runConnect(cmd *cobra.Command, args []string) error {
 // mode, and picks the helper architecture. Discovery always runs, because the
 // helper architecture comes from it; --no-discovery drops only the
 // discovery-sourced networks.
-func buildPlan(client *sshc.Client, rr *resolvedRemote, cfg *config.Config, ref, dnsFlag string, networkFlags, excludeFlags []string, noDiscovery bool) (*session.Plan, error) {
+func buildPlan(client *sshc.Client, rr *resolvedRemote, cfg *config.Config, ref, dnsFlag, transportFlag string, networkFlags, excludeFlags []string, noDiscovery bool) (*session.Plan, error) {
 	res, err := runDiscovery(client)
 	if err != nil {
 		return nil, fmt.Errorf("discovery: %w", err)
@@ -118,16 +124,35 @@ func buildPlan(client *sshc.Client, rr *resolvedRemote, cfg *config.Config, ref,
 	if err != nil {
 		return nil, err
 	}
-	slog.Debug("session networks", "count", len(networks), "networks", prefixStrings(networks), "dns", mode)
+	ports, err := m.QUICPorts()
+	if err != nil {
+		return nil, fmt.Errorf("manifest: %w", err)
+	}
+	up, down, err := m.Bandwidth()
+	if err != nil {
+		return nil, fmt.Errorf("manifest: %w", err)
+	}
+	tmode := transportMode(transportFlag, cfg, ref)
+	slog.Debug("session networks", "count", len(networks), "networks", prefixStrings(networks), "dns", mode, "transport", tmode)
 
 	return &session.Plan{
-		Remote:     rr.Peer.HostName,
-		Addr:       rr.Addr.String(),
-		User:       rr.User,
-		Networks:   prefixStrings(networks),
-		DNS:        session.PlanDNS{Mode: string(mode), Servers: servers, Domains: domains},
-		HelperArch: goarch,
+		Remote:        rr.Peer.HostName,
+		Addr:          rr.Addr.String(),
+		User:          rr.User,
+		Networks:      prefixStrings(networks),
+		DNS:           session.PlanDNS{Mode: string(mode), Servers: servers, Domains: domains},
+		HelperArch:    goarch,
+		Transport:     string(tmode),
+		QUICPorts:     ports.String(),
+		BandwidthUp:   up,
+		BandwidthDown: down,
 	}, nil
+}
+
+// transportMode picks the transport by precedence: the flag, then the remote
+// config, then the defaults, then auto.
+func transportMode(flag string, cfg *config.Config, ref string) transport.Mode {
+	return transport.Resolve(flag, cfg.Remotes[ref].Transport, cfg.Defaults.Transport)
 }
 
 func connectNetworks(m *manifest.Manifest, res *discovery.Result, cfg *config.Config, rr *resolvedRemote, networkFlags, excludeFlags []string, noDiscovery bool) ([]netip.Prefix, error) {

@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -12,8 +13,11 @@ import (
 	"github.com/evil8io/tailjump/internal/config"
 	"github.com/evil8io/tailjump/internal/discovery"
 	"github.com/evil8io/tailjump/internal/dns"
+	"github.com/evil8io/tailjump/internal/helper"
 	"github.com/evil8io/tailjump/internal/manifest"
 	"github.com/evil8io/tailjump/internal/platform"
+	"github.com/evil8io/tailjump/internal/session"
+	"github.com/evil8io/tailjump/internal/sshc"
 )
 
 func newDoctorCmd() *cobra.Command {
@@ -103,7 +107,33 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 
 	add("remote manifest checks", "pending (needs the helper)")
 
+	port, err := doctorQUIC(ctx, client, res, m, rr)
+	if err != nil {
+		add("quic transport", "fail: "+err.Error())
+	} else {
+		add("quic transport", fmt.Sprintf("ok, port %d", port))
+	}
+
 	return printDoctor(cmd, checks, asJSON)
+}
+
+// doctorQUIC brings the QUIC transport up through a temporary helper and
+// tears it down, so the report shows whether a UDP packet reaches the range
+// on the remote.
+func doctorQUIC(ctx context.Context, client *sshc.Client, res *discovery.Result, m *manifest.Manifest, rr *resolvedRemote) (uint16, error) {
+	goarch, err := helper.ArchForUname(res.UnameM)
+	if err != nil {
+		return 0, err
+	}
+	ports, err := m.QUICPorts()
+	if err != nil {
+		return 0, err
+	}
+	up, down, err := m.Bandwidth()
+	if err != nil {
+		return 0, err
+	}
+	return session.ProbeQUIC(ctx, client, goarch, rr.Addr, ports, up, down)
 }
 
 func decodeDoctorManifest(res *discovery.Result) (*manifest.Manifest, error) {

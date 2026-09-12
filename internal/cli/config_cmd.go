@@ -9,6 +9,7 @@ import (
 
 	"github.com/evil8io/tailjump/internal/config"
 	"github.com/evil8io/tailjump/internal/dns"
+	"github.com/evil8io/tailjump/internal/transport"
 )
 
 // newConfigCmd is the tj config command group. It reads and writes the
@@ -40,9 +41,10 @@ func newConfigPathCmd() *cobra.Command {
 }
 
 type configGetOutput struct {
-	User    string   `json:"user"`
-	DNS     string   `json:"dns"`
-	Exclude []string `json:"exclude,omitempty"`
+	User      string   `json:"user"`
+	DNS       string   `json:"dns"`
+	Transport string   `json:"transport"`
+	Exclude   []string `json:"exclude,omitempty"`
 }
 
 func newConfigGetCmd() *cobra.Command {
@@ -58,14 +60,16 @@ func newConfigGetCmd() *cobra.Command {
 			}
 			if asJSON {
 				return json.NewEncoder(cmd.OutOrStdout()).Encode(configGetOutput{
-					User:    cfg.Defaults.User,
-					DNS:     cfg.Defaults.DNS,
-					Exclude: cfg.Exclude,
+					User:      cfg.Defaults.User,
+					DNS:       cfg.Defaults.DNS,
+					Transport: cfg.Defaults.Transport,
+					Exclude:   cfg.Exclude,
 				})
 			}
 			w := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 4, 2, ' ', 0)
 			_, _ = fmt.Fprintf(w, "defaults.user:\t%s\n", valueOrDash(cfg.Defaults.User))
 			_, _ = fmt.Fprintf(w, "defaults.dns:\t%s\n", valueOrDash(cfg.Defaults.DNS))
+			_, _ = fmt.Fprintf(w, "defaults.transport:\t%s\n", valueOrDash(cfg.Defaults.Transport))
 			_, _ = fmt.Fprintf(w, "exclude:\t%s\n", joinOrDash(cfg.Exclude))
 			return w.Flush()
 		},
@@ -77,7 +81,7 @@ func newConfigGetCmd() *cobra.Command {
 func newConfigSetCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "set <key> <value>",
-		Short: "Set defaults.user or defaults.dns",
+		Short: "Set defaults.user, defaults.dns, or defaults.transport",
 		Args:  cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			key, value := args[0], args[1]
@@ -94,8 +98,13 @@ func newConfigSetCmd() *cobra.Command {
 					return fmt.Errorf("invalid dns %q, want none, split, or all", value)
 				}
 				cfg.Defaults.DNS = value
+			case "defaults.transport":
+				if !transport.Valid(value) {
+					return fmt.Errorf("invalid transport %q, want auto, quic, or ssh", value)
+				}
+				cfg.Defaults.Transport = value
 			default:
-				return fmt.Errorf("unknown key %q; set defaults.user or defaults.dns", key)
+				return fmt.Errorf("unknown key %q; set defaults.user, defaults.dns, or defaults.transport", key)
 			}
 			if err := saveLocalConfig(path, cfg); err != nil {
 				return fmt.Errorf("save config: %w", err)

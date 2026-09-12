@@ -22,7 +22,9 @@ Module `github.com/evil8io/tailjump`, Go 1.27, CGO off on every target.
 | `internal/discovery` | the embedded POSIX `sh` script and its JSON result |
 | `internal/tailnet` | the peers from the tailscaled local API |
 | `internal/sshc` | the SSH client: dial, exec, banner, host key store, keepalive |
-| `internal/mux` | the client side and the helper side of the mux protocol |
+| `internal/mux` | the client side and the helper side of the mux protocol, on the SSH transport and on the QUIC transport |
+| `internal/transport` | the transport mode, the QUIC port range, the rate parser, and the controller choice; standard library only |
+| `internal/congestion` | the BBR and Brutal controllers, copied from hysteria (MIT, see `LICENSE.hysteria`), and the function that applies one to a connection |
 | `internal/helper` | the remote side (`tj _remote`); `internal/helper/embed` has the built helper binaries |
 | `internal/dataplane` | the TUN device, the netstack, and the flow handler |
 | `internal/dns` | the DNS mode logic; the platform applies it |
@@ -38,7 +40,8 @@ Module `github.com/evil8io/tailjump`, Go 1.27, CGO off on every target.
 2. `task build` runs `task helpers`, then builds `cmd/tj` for the host into `bin/tj`.
 3. `internal/helper/embed` embeds `all:bin`. The directory has a `.gitkeep`, and the binaries are in `.gitignore`. A missing helper binary is a runtime error at `connect`, not a build error, so `go build ./...`, `go vet ./...`, and `go test ./...` work without `task helpers`.
 4. goreleaser runs `task helpers` in `before.hooks` and builds `linux/amd64`, `linux/arm64`, and `darwin/arm64`. The version comes from the git tag through `-X github.com/evil8io/tailjump/internal/version.Version=`.
-5. `cmd/tjhelper` imports no package that imports `tailscale.com`, cobra, or gvisor, and keeps `encoding/json` out. Measured 2026-09-11: the helper is 2.25 MiB for linux/arm64 with `-trimpath -ldflags "-s -w"`. Keep `encoding/json` and `log/slog` out of the helper graph; both pull weight for no benefit. Build the control line with `fmt.Appendf` and `%q`, and parse it on the client with `strconv`. yamux is the only non-stdlib dependency of the helper.
+5. `cmd/tjhelper` imports no package that imports `tailscale.com`, cobra, gvisor, or `log/slog`. It imports yamux, the quic-go fork `github.com/apernet/quic-go`, `crypto/tls`, and `internal/congestion`. `encoding/json` enters the helper graph through the fork's TLS fingerprint feature, which tj does not use; the mux package itself still builds its lines with `fmt.Appendf` and parses them with `strconv`. Measured 2026-09-12 with `-trimpath -ldflags "-s -w"`: 6.38 MiB for linux/arm64 and 6.93 MiB for linux/amd64, against 2.25 MiB and 2.30 MiB before the transport. The gate is 8 MiB, and `task helpers` fails at or above it. There is no room for a second large dependency.
+6. The fork publishes no usable module tag: its semver tags declare the upstream module path. The pin is a pseudo-version of its `v0.61.0-mod-rename` branch, and Renovate cannot follow it by tag. The reason for the fork is `Conn.SetCongestionControl`, which upstream does not export; see `docs/spikes/05-quic-transport.md`.
 
 ## Platform interfaces
 
@@ -100,19 +103,46 @@ The helper deletes its own file right after start with `os.Remove(os.Args[0])`, 
 
 The architecture map is `x86_64` to `amd64` and `aarch64` to `arm64`. Any other value is the error "unsupported remote architecture".
 
-### Mux protocol v1
+### Mux protocol v2 on the SSH transport
 
-The transport is the helper's stdin (client to helper) and stdout (helper to client).
+The SSH transport is the helper's stdin (client to helper) and stdout (helper to client). Protocol v2 differs from v1 in the handshake line, the control verbs of the QUIC negotiation, and the probe stream kind. The client uploads the helper embedded in its own binary, so the two always share one version, and the protocol number is a guard, not a negotiation.
 
-1. Handshake: the helper writes the line `TJ1\n` to stdout at start. The client waits at most 10 s for that line. Any other line before it is an error message.
+1. Handshake: the helper writes the line `TJ2\n` to stdout at start. The client waits at most 10 s for that line. Any other line before it is an error message.
 2. Then both sides run yamux over the transport: the client is `yamux.Client`, the helper is `yamux.Server`. Config: `EnableKeepAlive` on, `KeepAliveInterval` 10 s, `ConnectionWriteTimeout` 30 s, `MaxStreamWindowSize` 4 MiB. The keepalive is the liveness check of the session.
-3. The client opens every stream. The first byte of a stream is its kind: `0` control, `1` TCP, `2` UDP.
+3. The client opens every stream. The first byte of a stream is its kind: `0` control, `1` TCP, `2` UDP, `3` probe. A probe stream gets the status byte `0` and a close; the QUIC transport uses it right after its handshake.
 4. A TCP or UDP stream continues with the destination: 1 byte address length (4 or 16), the address bytes, and 2 bytes port, big-endian. The helper answers with 1 byte status: `0` ok, `1` refused, `2` unreachable, `3` timeout, `4` other. On a status other than `0`, the helper closes the stream. On a TCP stream the client waits for the status byte before it sends data. On a UDP stream the client does not wait; see the UDP item.
 5. TCP: after the status byte, the stream is the connection. A `Close` on one side is a half-close. The other side reads EOF and can still write.
 6. UDP: the client does not wait for the status byte. It sends the destination and then the first datagram frame at once, to save a round trip. A frame is 2 bytes length, big-endian, then the payload; both sides send frames. The helper has one UDP socket per stream, connected to the destination; on a dial error it writes a non-zero status byte and closes, which the client treats as the end of the flow. Each side closes the stream after an idle time: 60 s by default, and 10 s when the destination port is 53. A stream close ends the flow. Measured 2026-09-11: the status wait cost one round trip, 61 ms against 31 ms for a DNS query on a 29 ms path.
-7. Control: exactly one control stream, opened first. The helper writes one JSON line: `{"version":"…","goos":"linux","goarch":"…","hostname":"…","pid":…}`. The client can write the line `quit\n`. The helper then exits. The helper also exits when the transport closes.
+7. Control: exactly one control stream, opened first. The helper writes one JSON line: `{"version":"…","goos":"linux","goarch":"…","hostname":"…","pid":…}`. The client can write the line `quit\n`. The helper then closes its QUIC listener and exits. The helper also exits when the transport closes. The other control verbs are the QUIC negotiation below.
 
-The helper dials with a 10 s timeout from the remote's default source address. It opens no listener.
+The helper dials with a 10 s timeout from the remote's default source address. It opens no listener beyond the QUIC listener of the transport below.
+
+### Transport v2: QUIC over the tailnet
+
+Every TCP connection and UDP flow of a session runs as a stream of one QUIC connection between the client and the helper, over UDP to the remote's IPv4 tailnet address. Tailscale SSH stays the bootstrap, the only trust anchor, the control stream, and the fallback transport. The reason is the relayed path: a remote in a private subnet has no direct Tailscale path, DERP relays every packet, the relay loses packets, and one TCP connection that carries every flow collapses on that loss with head-of-line blocking and one shared congestion window. QUIC recovers per packet and keeps each stream independent. The spike that settled the numbers is `docs/spikes/05-quic-transport.md`, and the spec is K8S-206.
+
+Negotiation on the control stream, after the info line:
+
+1. The client writes `quic <bind-address> <first-port>-<last-port> <controller> <client-fingerprint>\n`. The bind address is the tailnet address the client dialed for SSH. The port range comes from the manifest `transport.quic_ports`, default `7443-7452`, because the helper cannot read the manifest. The controller is `bbr`, or `brutal=<bytes-per-second>` with the helper's send rate from the manifest `transport.bandwidth.down`. The fingerprint is `sha256:<hex>` of the client's DER certificate. This line is the chunk 2 amendment of K8S-206 contract C1, because the C1 line had no room for the range and the controller.
+2. The helper generates a self-signed ECDSA P-256 certificate in memory, binds the first free UDP port of the range on the bind address only, never the wildcard address, starts the QUIC listener, and writes `quic <port> <helper-fingerprint>\n`. When no port of the range binds, it writes `quic-unavailable <reason>\n`, and the session uses the SSH transport.
+3. The client dials `<bind-address>:<port>` with its certificate, ALPN `tj/2`, TLS 1.3, and a verify function that accepts only the helper certificate with the pinned fingerprint. The helper requires a client certificate and accepts only the pinned client fingerprint, and it refuses every handshake once a connection exists.
+4. Right after the handshake the client opens a probe stream, kind `3`, and waits for the status byte. TLS 1.3 lets the client complete the handshake before the helper has verified the client certificate, so only an answered probe proves that the helper accepted the connection. The dial, the probe, and the answer share one 5 s budget.
+5. When that budget passes without an answered probe, the client writes `quic-abandon\n`, the helper closes the listener, and the session uses the SSH transport with one warning that names the policy rule, `udp:<first>-<last>`.
+6. The helper accepts one QUIC connection per session. Both certificates are in memory only; the helper writes no file.
+
+QUIC configuration, on both sides: `InitialPacketSize` 1232 and `DisablePathMTUDiscovery` on, which are mandatory, because the tailnet path MTU is 1280 and the library default of 1280 bytes of payload completes no handshake in either direction, measured in spike 5; `MaxIdleTimeout` 30 s; `KeepAlivePeriod` 10 s; `MaxIncomingStreams` and `MaxIncomingUniStreams` 65536, because the library default of 100 is too low for a tunnel; 0-RTT off; datagrams off; no connection migration. The receive windows and the UDP socket buffers are the library defaults, because spike 5 measured no gain from larger ones; chunk 3 measures them.
+
+Congestion control: both sides install the controller right after the handshake with the fork's `Conn.SetCongestionControl`. BBR is the default. A manifest with `transport.bandwidth` selects Brutal: the client sends at `up`, the helper at `down`. Brutal sends at the configured rate and compensates loss, which is unfair on a shared relay, so it stays opt-in. Spike 5 measured 261.3 Mbit/s for BBR against 1.7 Mbit/s for Cubic at 7% loss and 30 ms delay.
+
+Flows over QUIC: the client opens every stream, and the first byte is the kind, `1` TCP, `2` UDP, or `3` probe. Kind `0` is refused, because the control stream stays on the SSH transport. The destination, the status byte, the UDP frames, and the idle timeouts are the same as on the SSH transport, and the helper dials the same way. A TCP flow's `Close` on a QUIC stream closes the send side only, and the peer reads EOF; a second `Close` at flow end releases the read side with `CancelRead`. `internal/dataplane` takes a `mux.Dialer` and does not know which transport serves it.
+
+Session lifecycle: the transport is selected right after the mux is up and before the device exists, so `--transport quic` fails early. The yamux keepalive on the SSH transport stays the liveness check of the session. A QUIC connection close ends the session by the same path as a mux close. The stop path closes the QUIC connection, sends `quit`, and the helper closes its listener before it exits; the helper also closes the listener when the SSH transport closes. The state file records `transport`, `quic_port`, and `fallback`, and `tj status` prints `quic (port N)` or `ssh (fallback: <reason>)`. `tj doctor` brings the transport up through a temporary helper, reports `ok, port N` or the reason, and tears it down.
+
+Selection: `tj connect --transport auto|quic|ssh`, then `remotes.<name>.transport`, then `defaults.transport`, default `auto`. `quic` fails the connect when the transport is unavailable, with no fallback; it is the test mode. `ssh` skips the negotiation.
+
+Security: the listener binds the tailnet address only, so it is not reachable from the VPC interface or from the internet. The tailnet policy gates the port range with one UDP rule per remote, for example `{"src": ["group:example"], "dst": ["tag:example"], "ip": ["udp:7443-7452"]}`; without it the session falls back. Mutual TLS pins both certificates by fingerprints that cross the already-authenticated SSH channel, so there is no second trust anchor. The helper accepts one connection per session. Keys and certificates are per session and in memory. The listener closes on `quic-abandon`, on `quit`, and when the SSH transport closes.
+
+Invariants: the tailnet range is excluded from the session networks in every version, so the client's UDP socket to the tailnet address is never routed through `tj0`. The QUIC transport forwards exactly what the SSH transport forwards, the flows to the session networks, and adds no reachability. No file, listener, or process remains on the remote after a session, on every exit path.
 
 ## The session
 
@@ -127,14 +157,14 @@ The root copy is root-owned, so the NOPASSWD rule does not point at a user-writa
 1. The unprivileged `tj connect` resolves the remote, opens SSH, reads the manifest, runs discovery, and computes the session networks. It refuses on an empty set. It refuses when a session is active, unless `--replace`.
 2. It writes the plan as JSON to the stdin of `sudo -n /usr/local/libexec/tj/tj _session start`. When the effective uid is 0, it runs the same code in-process without sudo.
 3. `_session start` writes the plan to `/run/tj/plan.json` (0600) and starts the unit: `systemd-run --unit tj-session --collect --property KillMode=mixed --property TimeoutStopSec=20 --property "ExecStopPost=<root tj> _session cleanup" <root tj> _session run /run/tj/plan.json`. With `--foreground`, it runs `_session run` in-process instead.
-4. `_session run` opens SSH, uploads and starts the helper, opens the mux, creates the device, adds the routes, applies the DNS mode, writes the state file with status `up`, and waits for a signal or a mux failure. On exit it reverts the DNS, removes the routes and the device, sends `quit` to the helper, and removes the state file.
+4. `_session run` opens SSH, uploads and starts the helper, opens the mux, selects the transport, creates the device, adds the routes, applies the DNS mode, writes the state file with status `up`, and waits for a signal, a mux failure, or a QUIC connection close. On exit it reverts the DNS, removes the routes and the device, closes the QUIC connection, sends `quit` to the helper, and removes the state file.
 5. `_session start` waits up to 60 s for the state file with status `up` or for the unit to fail, and prints the result.
 6. `tj disconnect` runs `sudo -n /usr/local/libexec/tj/tj _session stop`, which runs `systemctl stop tj-session`.
 7. `_session cleanup` runs after every stop. It reverts the DNS on `tj0`, restores `/etc/resolv.conf` from the backup, deletes `tj0` when it exists, and removes the state and plan files. Every step is safe to repeat.
 
-The plan JSON: `{"remote":…,"addr":…,"user":…,"networks":[…],"dns":{"mode":…,"servers":[…],"domains":[…]},"helper_arch":…}`.
+The plan JSON: `{"remote":…,"addr":…,"user":…,"networks":[…],"dns":{"mode":…,"servers":[…],"domains":[…]},"helper_arch":…,"transport":"auto|quic|ssh","quic_ports":"7443-7452","bandwidth_up":0,"bandwidth_down":0}`. The bandwidths are bytes per second, zero for BBR.
 
-The state file `/run/tj/session.json` (0644): `{"remote":…,"addr":…,"user":…,"networks":[…],"dns":{…},"started_at":…,"pid":…,"status":"starting|up|stopping"}`. `tj status` reads it without root.
+The state file `/run/tj/session.json` (0644): `{"remote":…,"addr":…,"user":…,"networks":[…],"dns":{…},"started_at":…,"pid":…,"status":"starting|up|stopping","transport":"quic|ssh","quic_port":…,"fallback":…}`. `tj status` reads it without root.
 
 The lock is the unit name `tj-session.service` plus the state file. macOS uses the pid in the state file instead of a unit.
 
@@ -264,7 +294,8 @@ A remote's `networks` and `exclude` feed the session network computation: `netwo
 
 * Unit tests are next to the code. The `fake` platform serves `session` and `dns`.
 * The loopback test in `internal/dataplane` runs the netstack, the mux client, and the helper in one process over `net.Pipe()`. It sends TCP to a local listener and UDP to a local echo server. It needs no device and no root.
-* `test/e2e` is a rootless podman rig: `ubuntu:26.04` with systemd and systemd-resolved, run with `--systemd=always --device /dev/net/tun --cap-add NET_ADMIN --cap-add NET_RAW --cap-add SYS_ADMIN`, the tailscaled socket mounted at `/var/run/tailscale/tailscaled.sock`, and the built `tj` mounted. `task e2e` runs it. The rig connects to the shared gateway `shared-gateway` as `root`. It checks TCP over IPv4 and IPv6 to the gateway's VPC addresses on port 22, UDP DNS to the VPC resolver, each DNS mode, `disconnect`, the one-session lock, and the empty remote. Verified on 2026-09-11: systemd, resolved, TUN, routes, and the local API work in this rig. Without `CAP_SYS_ADMIN`, resolved fails to start.
+* The QUIC loopback test in `internal/mux` negotiates the transport over a yamux loopback and dials a helper listener on 127.0.0.1 in one process. It checks a TCP echo, a UDP echo, a refused second connection, a rejected wrong fingerprint on each side, a refused control stream, and a freed port after `quic-abandon` and after `quit`.
+* `test/e2e` is a rootless podman rig: `ubuntu:26.04` with systemd, systemd-resolved, and nftables, run with `--systemd=always --device /dev/net/tun --cap-add NET_ADMIN --cap-add NET_RAW --cap-add SYS_ADMIN`, the tailscaled socket mounted at `/var/run/tailscale/tailscaled.sock`, and the built `tj` mounted. `test/e2e/run.sh` runs it. The rig connects to the shared gateway `shared-gateway` as `root`. It checks that the session comes up on the QUIC transport with the helper port bound to the tailnet address only, TCP over IPv4 and IPv6 to the gateway's VPC addresses, UDP DNS to the VPC resolver, each DNS mode, `disconnect`, the one-session lock, and the empty remote. It then drops the helper's replies from the UDP range with an nftables input rule inside the rig, which reproduces a tailnet policy without the UDP rule, and checks the fallback to the SSH transport within 5 s plus the SSH baseline, with the warning in the journal, and that `--transport quic` fails without a session. An output-side drop would fail the send at once with EPERM and skip the timeout path. With `TJ_TEST_DERP_REF` set it also connects once to a DERP-relayed remote and checks the QUIC transport there. Verified on 2026-09-11: systemd, resolved, TUN, routes, and the local API work in this rig. Without `CAP_SYS_ADMIN`, resolved fails to start. The rig's user-mode NAT does not carry the DF bit, so a packet size check must run from a client that owns its own route, not from the rig; see spike 5.
 * `tj connect` never runs on the client machine during development. The client has an sshuttle session, and the one-session rule applies. The rig is the place for every connect test.
 
 ## Performance, spike 1, 2026-09-11
@@ -281,3 +312,5 @@ Download of 256 MiB, median of 3 runs, from the shared gateway over a WiFi clien
 | sshuttle 1.3.2 | 8.5 |
 
 tj reaches 96% of the raw SSH channel and 6.1 times sshuttle. The only setting with a measurable effect is the yamux `MaxStreamWindowSize` at 4 MiB; the 256 KiB default equals the path's bandwidth-delay product. The netstack receive buffer and SACK have no effect, because the only connection the netstack terminates is the lossless local leg over the TUN. One 256 MiB download costs the client 7.1% of one core and the helper 1.7%. The helper upload takes 291 ms, which is 90 Mbit/s.
+
+The QUIC transport numbers are in `docs/spikes/05-quic-transport.md`: on the direct path a raw QUIC download from the rig reached 1.9 times the same-day raw SSH channel, and under 7% loss BBR carried 154 times what Cubic carried. Chunk 3 of K8S-206 records the tj numbers on both transports under loss.
