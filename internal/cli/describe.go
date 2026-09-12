@@ -13,6 +13,7 @@ import (
 	"github.com/evil8io/tailjump/internal/config"
 	"github.com/evil8io/tailjump/internal/discovery"
 	"github.com/evil8io/tailjump/internal/manifest"
+	"github.com/evil8io/tailjump/internal/protocols"
 	"github.com/evil8io/tailjump/internal/sshc"
 )
 
@@ -45,6 +46,7 @@ type describeOutput struct {
 	Remote         string             `json:"remote"`
 	Addr           string             `json:"addr"`
 	User           string             `json:"user"`
+	Protocols      string             `json:"protocols"`
 	ManifestSource string             `json:"manifest_source"`
 	Manifest       *manifest.Manifest `json:"manifest"`
 	Discovery      *discovery.Result  `json:"discovery,omitempty"`
@@ -173,11 +175,16 @@ func buildDescribeOutput(client *sshc.Client, rr *resolvedRemote, cfg *config.Co
 	if source == "" {
 		source = "none"
 	}
+	set, err := protocols.Resolve("", rr.Config.Protocols, cfg.Defaults.Protocols)
+	if err != nil {
+		return nil, err
+	}
 
 	return &describeOutput{
 		Remote:         rr.Peer.HostName,
 		Addr:           rr.Addr.String(),
 		User:           rr.User,
+		Protocols:      set.String(),
 		ManifestSource: source,
 		Manifest:       m,
 		Discovery:      discRes,
@@ -197,6 +204,7 @@ func printDescribe(cmd *cobra.Command, out *describeOutput) error {
 
 	_, _ = fmt.Fprintf(w, "Remote:\t%s (%s)\n", out.Remote, out.Addr)
 	_, _ = fmt.Fprintf(w, "User:\t%s\n", out.User)
+	_, _ = fmt.Fprintf(w, "Protocols:\t%s\n", out.Protocols)
 	_, _ = fmt.Fprintf(w, "Manifest:\t%s\n", out.ManifestSource)
 	m := out.Manifest
 	if m.Name != "" {

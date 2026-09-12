@@ -1,11 +1,12 @@
 // Package mux is the client side and the helper side of the tj mux protocol.
 // The SSH transport is the helper's stdin and stdout. The helper writes the
-// line TJ2 at start, then both sides run yamux over the transport. The client
-// opens every stream: a control stream, one stream per TCP connection, and
-// one stream per UDP flow. The control stream negotiates the QUIC transport,
-// and the flows then run as QUIC streams with the same wire format. This
-// package imports yamux, the quic-go fork, and the standard library only, so
-// the helper that embeds it stays small.
+// line TJ3 at start, then both sides run yamux over the transport. The client
+// opens every stream: a control stream, one stream per TCP connection, one
+// stream per UDP flow, and one stream per ICMP echo flow. The control stream
+// negotiates the QUIC transport, and the flows then run as QUIC streams with
+// the same wire format. This package imports yamux, the quic-go fork,
+// x/sys/unix, and the standard library only, so the helper that embeds it
+// stays small.
 package mux
 
 import (
@@ -30,6 +31,7 @@ const (
 	kindTCP     byte = 1
 	kindUDP     byte = 2
 	kindProbe   byte = 3
+	kindICMP    byte = 4
 )
 
 // Dial status, the helper's reply on a TCP or UDP stream.
@@ -39,10 +41,11 @@ const (
 	statusUnreachable byte = 2
 	statusTimeout     byte = 3
 	statusOther       byte = 4
+	statusUnsupported byte = 5
 )
 
 // handshakeLine is the line the helper writes to the transport at start.
-const handshakeLine = "TJ2"
+const handshakeLine = "TJ3"
 
 const (
 	handshakeTimeout = 10 * time.Second
@@ -59,7 +62,7 @@ const (
 	maxLineLen  = 4096
 	maxUDPFrame = 0xffff
 
-	quicALPN             = "tj/2"
+	quicALPN             = "tj/3"
 	quicHandshakeTimeout = 5 * time.Second
 	quicReplyTimeout     = 15 * time.Second
 	quicIdleTimeout      = 30 * time.Second
@@ -77,6 +80,7 @@ const (
 	verbQUIC        = "quic"
 	verbUnavailable = "quic-unavailable"
 	verbAbandon     = "quic-abandon"
+	verbICMP        = "icmp"
 )
 
 // Errors a client Dial returns for a non-zero helper status.
@@ -96,11 +100,12 @@ type Stream interface {
 	SetReadDeadline(t time.Time) error
 }
 
-// Dialer opens TCP and UDP flows to the remote helper. The yamux Client
-// implements it.
+// Dialer opens TCP, UDP, and ICMP echo flows to the remote helper. The
+// yamux Client and the QUICClient implement it.
 type Dialer interface {
 	DialTCP(dst netip.AddrPort) (net.Conn, error)
 	DialUDP(dst netip.AddrPort) (*UDPConn, error)
+	DialICMP(dst netip.Addr, ident uint16) (*EchoConn, error)
 }
 
 // ControlInfo is the JSON line the helper writes on the control stream.
@@ -306,7 +311,7 @@ func readDest(r io.Reader) (netip.AddrPort, error) {
 	return netip.AddrPortFrom(addr, binary.BigEndian.Uint16(port[:])), nil
 }
 
-// writeFrame writes a UDP frame: 2 bytes length big-endian, then the payload.
+// writeFrame writes a flow frame: 2 bytes length big-endian, then the body.
 func writeFrame(w io.Writer, p []byte) error {
 	if len(p) > maxUDPFrame {
 		return fmt.Errorf("mux: udp frame too large: %d", len(p))

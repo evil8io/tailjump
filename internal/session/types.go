@@ -29,6 +29,9 @@ type Plan struct {
 	// Controller overrides the controller rule on both sides. Only cubic is
 	// valid, as a measurement knob; empty means the rule.
 	Controller string `json:"controller,omitempty"`
+	// Protocols is the set the client forwards, for example "tcp,udp,icmp".
+	// An empty value means all three.
+	Protocols string `json:"protocols"`
 }
 
 // Session status values in the state file.
@@ -59,4 +62,6 @@ type State struct {
 	Transport string `json:"transport"`
 	QUICPort  uint16 `json:"quic_port,omitempty"`
 	Fallback  string `json:"fallback,omitempty"`
+	// Protocols is the set the session forwards.
+	Protocols string `json:"protocols"`
 }

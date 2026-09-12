@@ -16,7 +16,7 @@ func newStatusCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "status",
 		Aliases: []string{"st"},
-		Short:   "Print the active session, its transport, its path, its networks, the DNS mode, and the uptime",
+		Short:   "Print the active session, its transport, its path, its protocols, its networks, the DNS mode, and the uptime",
 		RunE:    runStatus,
 	}
 	cmd.Flags().Bool("json", false, "print JSON output")
@@ -55,6 +55,7 @@ func runStatus(cmd *cobra.Command, _ []string) error {
 	_, _ = fmt.Fprintf(tw, "Status:\t%s\n", st.Status)
 	_, _ = fmt.Fprintf(tw, "Transport:\t%s\n", transportLine(st))
 	_, _ = fmt.Fprintf(tw, "Path:\t%s\n", path)
+	_, _ = fmt.Fprintf(tw, "Protocols:\t%s\n", valueOrDash(st.Protocols))
 	_, _ = fmt.Fprintf(tw, "DNS mode:\t%s\n", st.DNS.Mode)
 	_, _ = fmt.Fprintf(tw, "Uptime:\t%s\n", uptime(st.StartedAt))
 	_, _ = fmt.Fprintf(tw, "Networks:\t%s\n", joinOrNone(st.Networks))

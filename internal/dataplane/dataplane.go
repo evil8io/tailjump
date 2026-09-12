@@ -13,6 +13,7 @@ import (
 	"gvisor.dev/gvisor/pkg/tcpip/stack"
 
 	"github.com/evil8io/tailjump/internal/mux"
+	"github.com/evil8io/tailjump/internal/protocols"
 )
 
 // tunOffset is the headroom in every buffer. CreateTUN enables GSO, so a
@@ -22,7 +23,8 @@ import (
 const tunOffset = 16
 
 // DataPlane runs the netstack over a TUN device and forwards every captured
-// TCP and UDP flow to the remote helper over the mux.
+// TCP, UDP, and ICMP echo flow of the protocol set to the remote helper over
+// the mux.
 type DataPlane struct {
 	dev tun.Device
 	ns  *netStack
@@ -32,9 +34,10 @@ type DataPlane struct {
 }
 
 // New builds the netstack for the device MTU and wires it to the mux dialer.
-// The device is the capture; the dialer is the remote side.
-func New(dev tun.Device, dialer mux.Dialer, mtu int) (*DataPlane, error) {
-	ns, err := newNetStack(uint32(mtu), dialer)
+// The device is the capture; the dialer is the remote side; the set says
+// which protocols the client forwards.
+func New(dev tun.Device, dialer mux.Dialer, mtu int, set protocols.Set) (*DataPlane, error) {
+	ns, err := newNetStack(uint32(mtu), dialer, set)
 	if err != nil {
 		return nil, err
 	}
@@ -70,7 +73,8 @@ func (d *DataPlane) Wait() {
 }
 
 // tunToStack reads packets from the device in batches and injects each into
-// the netstack.
+// the netstack. An ICMP echo request goes to its own flow instead, because
+// the netstack has no forwarder for it.
 func (d *DataPlane) tunToStack() {
 	batch := d.dev.BatchSize()
 	bufs := make([][]byte, batch)
@@ -90,6 +94,9 @@ func (d *DataPlane) tunToStack() {
 			pkt := bufs[i][tunOffset : tunOffset+sizes[i]]
 			pn, ok := protoOf(pkt)
 			if !ok {
+				continue
+			}
+			if d.ns.captureEcho(pkt) {
 				continue
 			}
 			pb := stack.NewPacketBuffer(stack.PacketBufferOptions{

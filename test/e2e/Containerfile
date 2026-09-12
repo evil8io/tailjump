@@ -12,6 +12,7 @@ RUN apt-get update \
 		dnsutils \
 		netcat-openbsd \
 		iputils-ping \
+		traceroute \
 		nftables \
 		ca-certificates \
 	&& apt-get clean \

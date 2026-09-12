@@ -22,6 +22,7 @@ type Defaults struct {
 	User      string `yaml:"user"`
 	DNS       string `yaml:"dns"`
 	Transport string `yaml:"transport,omitempty"`
+	Protocols string `yaml:"protocols,omitempty"`
 }
 
 // RemoteConfig is one entry under remotes.
@@ -30,6 +31,7 @@ type RemoteConfig struct {
 	User      string   `yaml:"user,omitempty" json:"user,omitempty"`
 	DNS       string   `yaml:"dns,omitempty" json:"dns,omitempty"`
 	Transport string   `yaml:"transport,omitempty" json:"transport,omitempty"`
+	Protocols string   `yaml:"protocols,omitempty" json:"protocols,omitempty"`
 	Networks  []string `yaml:"networks,omitempty" json:"networks,omitempty"`
 	Exclude   []string `yaml:"exclude,omitempty" json:"exclude,omitempty"`
 }

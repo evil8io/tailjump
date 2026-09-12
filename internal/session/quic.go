@@ -101,24 +101,38 @@ func (p *Plan) quicPorts() (transport.PortRange, error) {
 	return r, nil
 }
 
-// ProbeQUIC uploads the helper, negotiates the QUIC transport, dials it, and
-// tears everything down. tj doctor uses it to report whether the transport
-// comes up on the remote. It returns the helper's port.
-func ProbeQUIC(ctx context.Context, client *sshc.Client, arch string, addr netip.Addr, ports transport.PortRange, up, down uint64) (uint16, error) {
+// ProbeResult is what tj doctor learns through a temporary helper: the
+// QUIC transport port or the reason it did not come up, and the socket the
+// remote offers for ICMP echo.
+type ProbeResult struct {
+	QUICPort uint16
+	QUICErr  error
+	Echo     mux.EchoSocketInfo
+	EchoErr  error
+}
+
+// Probe uploads the helper, asks it for its echo socket, negotiates the
+// QUIC transport, dials it, and tears everything down.
+func Probe(ctx context.Context, client *sshc.Client, arch string, addr netip.Addr, ports transport.PortRange, up, down uint64) (ProbeResult, error) {
 	muxClient, err := startHelper(client, arch)
 	if err != nil {
-		return 0, err
+		return ProbeResult{}, err
 	}
 	defer func() { _ = muxClient.Close() }()
 	defer func() { _ = muxClient.Quit() }()
+
+	var res ProbeResult
+	res.Echo, res.EchoErr = muxClient.QueryEchoSocket()
+
 	q, reason, err := dialQUIC(ctx, muxClient, addr, ports, transport.ControllerFor(up), transport.ControllerFor(down))
-	if err != nil {
-		return 0, err
+	switch {
+	case err != nil:
+		res.QUICErr = err
+	case q == nil:
+		res.QUICErr = errors.New(reason)
+	default:
+		res.QUICPort = q.Port()
+		_ = q.Close()
 	}
-	if q == nil {
-		return 0, errors.New(reason)
-	}
-	port := q.Port()
-	_ = q.Close()
-	return port, nil
+	return res, nil
 }

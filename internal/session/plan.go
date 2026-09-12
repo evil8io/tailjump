@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 
 	"github.com/evil8io/tailjump/internal/dns"
+	"github.com/evil8io/tailjump/internal/protocols"
 )
 
 const (
@@ -92,6 +93,18 @@ func ReadState(path string) (*State, error) {
 		return nil, fmt.Errorf("parse state: %w", err)
 	}
 	return &st, nil
+}
+
+// protocolSet parses the plan's protocol set. An empty value is all three.
+func (p *Plan) protocolSet() (protocols.Set, error) {
+	if p.Protocols == "" {
+		return protocols.All(), nil
+	}
+	set, err := protocols.Parse(p.Protocols)
+	if err != nil {
+		return protocols.Set{}, fmt.Errorf("plan protocols: %w", err)
+	}
+	return set, nil
 }
 
 // planNetworks parses the plan's session networks.

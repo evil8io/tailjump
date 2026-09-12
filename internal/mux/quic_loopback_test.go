@@ -104,16 +104,16 @@ func TestQUICLoopbackUDP(t *testing.T) {
 	defer func() { _ = conn.Close() }()
 
 	want := []byte("ping over quic")
-	if err := conn.WriteFrame(want); err != nil {
-		t.Fatalf("WriteFrame: %v", err)
+	if err := conn.WriteDatagram(64, want); err != nil {
+		t.Fatalf("WriteDatagram: %v", err)
 	}
 	_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second))
-	got, err := conn.ReadFrame()
+	got, err := conn.ReadReply()
 	if err != nil {
-		t.Fatalf("ReadFrame: %v", err)
+		t.Fatalf("ReadReply: %v", err)
 	}
-	if !bytes.Equal(got, want) {
-		t.Fatalf("echo = %q, want %q", got, want)
+	if !bytes.Equal(got.Payload, want) {
+		t.Fatalf("echo = %q, want %q", got.Payload, want)
 	}
 }
 

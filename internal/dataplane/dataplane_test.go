@@ -21,6 +21,7 @@ import (
 	"gvisor.dev/gvisor/pkg/tcpip/transport/udp"
 
 	"github.com/evil8io/tailjump/internal/mux"
+	"github.com/evil8io/tailjump/internal/protocols"
 )
 
 const testMTU = 1500
@@ -51,6 +52,11 @@ type loopback struct {
 
 func newLoopback(t *testing.T) *loopback {
 	t.Helper()
+	return newLoopbackWith(t, protocols.All())
+}
+
+func newLoopbackWith(t *testing.T, set protocols.Set) *loopback {
+	t.Helper()
 
 	clientPipe, helperPipe := net.Pipe()
 	go func() {
@@ -64,7 +70,7 @@ func newLoopback(t *testing.T) *loopback {
 		t.Fatalf("mux client: %v", err)
 	}
 
-	ns, err := newNetStackWith(testMTU, client, loopbackNetProtos())
+	ns, err := newNetStackWith(testMTU, client, set, loopbackNetProtos())
 	if err != nil {
 		t.Fatalf("netstack: %v", err)
 	}
