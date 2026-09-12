@@ -181,6 +181,24 @@ else
 	bad "status does not show the session up"
 fi
 
+log "session routes: the session table and the rules exist, and main has no tj0 route"
+if rig ip rule show | grep -q 'lookup 117' && rig ip -6 rule show | grep -q 'lookup 117'; then
+	ok "the session rules exist for IPv4 and IPv6"
+else
+	bad "a session rule is missing"
+	rig sh -c 'ip rule show; ip -6 rule show'
+fi
+if rig ip route show table 117 | grep -q 'dev tj0'; then
+	ok "the session table has the tj0 routes"
+else
+	bad "the session table has no tj0 route"
+fi
+if rig ip -4 route show | grep -q 'dev tj0'; then
+	bad "the main table has a tj0 route"
+else
+	ok "the main table has no tj0 route"
+fi
+
 log "transport: the session runs on quic with a port from ${QUIC_PORTS}"
 TRANSPORT="$(status_transport)"
 QUIC_PORT="$(printf '%s' "$TRANSPORT" | grep -oE 'port [0-9]+' | awk '{print $2}')"
@@ -262,6 +280,18 @@ if [ -z "$LEFT" ]; then
 	ok "no tj file remains on the remote"
 else
 	bad "files remain on the remote: ${LEFT}"
+fi
+
+log "session routes: the rules and the table are gone after disconnect"
+if rig ip rule show | grep -q 'lookup 117' || rig ip -6 rule show | grep -q 'lookup 117'; then
+	bad "a session rule remains after disconnect"
+else
+	ok "no session rule remains after disconnect"
+fi
+if [ -z "$(rig ip route show table 117 2>/dev/null)$(rig ip -6 route show table 117 2>/dev/null)" ]; then
+	ok "the session table is empty after disconnect"
+else
+	bad "the session table still has routes after disconnect"
 fi
 
 log "confirm no helper listener remains on the remote"

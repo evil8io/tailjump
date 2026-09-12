@@ -184,6 +184,7 @@ func Run(ctx context.Context, planPath string) (err error) {
 		slog.Warn("write up state", "error", err)
 	}
 	slog.Info("session up", "remote", plan.Remote, "networks", len(plan.Networks), "dns", plan.DNS.Mode, "transport", state.Transport)
+	stopWatch := watchTransportPath(ctx, addr, routes)
 
 	select {
 	case <-ctx.Done():
@@ -196,8 +197,10 @@ func Run(ctx context.Context, planPath string) (err error) {
 
 	state.Status = StatusStopping
 	_ = writeState(statePath, state)
+	stopWatch()
 	revertDNS(plat, name)
 	removeRoutes(plat, name, routes)
+	resetRoutes(plat)
 	if quicClient != nil {
 		_ = quicClient.Close()
 	}
@@ -230,6 +233,14 @@ func teardownDevice(plat platform.Platform, dev tun.Device, name string) {
 func removeRoutes(plat platform.Platform, name string, routes []netip.Prefix) {
 	if err := plat.Router.Remove(name, routes); err != nil {
 		slog.Warn("remove routes", "device", name, "error", err)
+	}
+}
+
+// resetRoutes removes the session rules and flushes the session table, and
+// logs a failure. A device delete leaves the rules behind.
+func resetRoutes(plat platform.Platform) {
+	if err := plat.Router.Reset(); err != nil {
+		slog.Warn("reset routes", "error", err)
 	}
 }
 
@@ -271,6 +282,7 @@ func cleanup(plat platform.Platform) error {
 
 	revertDNS(plat, deviceName)
 	teardownDevice(plat, nil, deviceName)
+	resetRoutes(plat)
 
 	if err := os.Remove(statePath); err != nil && !errors.Is(err, os.ErrNotExist) {
 		slog.Warn("cleanup: remove state file", "error", err)
