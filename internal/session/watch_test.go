@@ -7,28 +7,34 @@ import (
 	"github.com/evil8io/tailjump/internal/tailnet"
 )
 
-func TestEndpointInside(t *testing.T) {
-	remote := netip.MustParseAddr("100.64.0.10")
-	networks := []netip.Prefix{netip.MustParsePrefix("10.0.0.0/16"), netip.MustParsePrefix("2001:db8::/56")}
-	peer := func(cur string) *tailnet.Status {
-		return &tailnet.Status{Peers: []tailnet.Peer{{HostName: "gw", TailscaleIPs: []netip.Addr{remote}, CurAddr: cur}}}
-	}
+func TestPathChanges(t *testing.T) {
 	cases := []struct {
-		cur    string
-		inside bool
+		samples []string
+		want    int
 	}{
-		{"10.0.0.10:41641", true},
-		{"[2001:db8:0:1::a]:41641", true},
-		{"203.0.113.5:41641", false},
-		{"", false},
+		{nil, 0},
+		{[]string{"a"}, 0},
+		{[]string{"", "", "a", "a", "a"}, 1},
+		{[]string{"a", "", "a", "", "a"}, 4},
+		{[]string{"", "", "", ""}, 0},
 	}
 	for _, c := range cases {
-		if _, got := endpointInside(peer(c.cur), remote, networks); got != c.inside {
-			t.Errorf("endpointInside(%q) = %v, want %v", c.cur, got, c.inside)
+		if got := pathChanges(c.samples); got != c.want {
+			t.Errorf("pathChanges(%v) = %d, want %d", c.samples, got, c.want)
 		}
 	}
-	other := &tailnet.Status{Peers: []tailnet.Peer{{HostName: "x", TailscaleIPs: []netip.Addr{netip.MustParseAddr("100.64.0.11")}, CurAddr: "10.0.0.10:41641"}}}
-	if _, got := endpointInside(other, remote, networks); got {
-		t.Error("a different peer counted as the remote")
+}
+
+func TestEndpointOf(t *testing.T) {
+	remote := netip.MustParseAddr("100.64.0.10")
+	st := &tailnet.Status{Peers: []tailnet.Peer{
+		{HostName: "other", TailscaleIPs: []netip.Addr{netip.MustParseAddr("100.64.0.11")}, CurAddr: "203.0.113.5:41641"},
+		{HostName: "gw", TailscaleIPs: []netip.Addr{remote}, CurAddr: "[2001:db8::a]:41641"},
+	}}
+	if got := endpointOf(st, remote); got != "[2001:db8::a]:41641" {
+		t.Errorf("endpointOf = %q", got)
+	}
+	if got := endpointOf(st, netip.MustParseAddr("100.64.0.12")); got != "" {
+		t.Errorf("unknown peer = %q", got)
 	}
 }
