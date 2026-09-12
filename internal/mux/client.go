@@ -85,6 +85,22 @@ func (c *Client) Quit() error {
 	return nil
 }
 
+// Unlink asks the helper to remove its own file from the remote and waits
+// for the answer, so the caller knows the file is gone before the session
+// reports up. The client sends it once the file has served every lane.
+func (c *Client) Unlink() error {
+	if _, err := c.ctl.Write([]byte(verbUnlink + "\n")); err != nil {
+		return fmt.Errorf("unlink request: %w", err)
+	}
+	_ = c.ctl.SetReadDeadline(time.Now().Add(quicReplyTimeout))
+	defer func() { _ = c.ctl.SetReadDeadline(time.Time{}) }()
+	line, err := readLine(c.ctl, maxLineLen)
+	if err != nil {
+		return fmt.Errorf("unlink reply: %w", err)
+	}
+	return parseUnlinkReply(line)
+}
+
 // NegotiateQUIC asks the helper to start its QUIC listener and returns the
 // port and the helper's certificate fingerprint. A helper that cannot listen
 // answers with an *UnavailableError.

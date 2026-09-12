@@ -33,6 +33,11 @@ type Server struct {
 	// LogW receives one line per dial error. A nil LogW disables logging.
 	LogW io.Writer
 
+	// Unlink runs when the client sends the unlink verb and returns the
+	// error of the remove. The helper sets it to the remove of its own file,
+	// so this package needs no file logic. A nil Unlink answers ok.
+	Unlink func() error
+
 	quicMu sync.Mutex
 	quic   *quicServer
 }
@@ -156,8 +161,23 @@ func (s *Server) handleControl(stream Stream, stop func()) {
 			if _, err := stream.Write(probeEchoSocket().encode()); err != nil {
 				return
 			}
+		case verbUnlink:
+			if _, err := stream.Write(s.answerUnlink()); err != nil {
+				return
+			}
 		}
 	}
+}
+
+// answerUnlink removes the helper file and returns the reply line: ok, or
+// the reason the remove failed.
+func (s *Server) answerUnlink() []byte {
+	if s.Unlink != nil {
+		if err := s.Unlink(); err != nil {
+			return encodeUnlinkReply(err.Error())
+		}
+	}
+	return encodeUnlinkReply(unlinkOK)
 }
 
 // answerQUIC starts the listener for a quic request and returns the reply

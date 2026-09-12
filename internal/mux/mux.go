@@ -1,6 +1,6 @@
 // Package mux is the client side and the helper side of the tj mux protocol.
 // The SSH transport is the helper's stdin and stdout. The helper writes the
-// line TJ3 at start, then both sides run yamux over the transport. The client
+// line TJ4 at start, then both sides run yamux over the transport. The client
 // opens every stream: a control stream, one stream per TCP connection, one
 // stream per UDP flow, and one stream per ICMP echo flow. The control stream
 // negotiates the QUIC transport, and the flows then run as QUIC streams with
@@ -45,7 +45,7 @@ const (
 )
 
 // handshakeLine is the line the helper writes to the transport at start.
-const handshakeLine = "TJ3"
+const handshakeLine = "TJ4"
 
 const (
 	handshakeTimeout = 10 * time.Second
@@ -62,7 +62,7 @@ const (
 	maxLineLen  = 4096
 	maxUDPFrame = 0xffff
 
-	quicALPN             = "tj/3"
+	quicALPN             = "tj/4"
 	quicHandshakeTimeout = 5 * time.Second
 	quicReplyTimeout     = 15 * time.Second
 	quicIdleTimeout      = 30 * time.Second
@@ -81,6 +81,7 @@ const (
 	verbUnavailable = "quic-unavailable"
 	verbAbandon     = "quic-abandon"
 	verbICMP        = "icmp"
+	verbUnlink      = "unlink"
 )
 
 // Errors a client Dial returns for a non-zero helper status.

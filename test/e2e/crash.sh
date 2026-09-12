@@ -12,7 +12,10 @@
 # ExecStopPost cleanup still removes the device, the routes, and the remote
 # file, and that a second manual cleanup call is a no-op. Scenario B ends a
 # session the normal way, with tj disconnect, which stops the unit with
-# SIGTERM.
+# SIGTERM. Scenario C repeats the hard kill of scenario A on the ssh
+# transport, where a session runs one helper process per lane, and checks
+# that the crash clears every helper process and the remote cache, not only
+# the single quic helper.
 #
 # Scenario A signals the tracked PID rather than running
 # `systemctl kill -s SIGKILL tj-session`: measured on this rig, `systemctl
@@ -43,6 +46,8 @@ fi
 : "${TJ_TEST_REF:?set TJ_TEST_REF (the connect reference, a hostname or tag) in target.env or the environment}"
 : "${TJ_TEST_REMOTE:?set TJ_TEST_REMOTE (the gateway tailnet IPv4) in target.env or the environment}"
 TJ_TEST_USER="${TJ_TEST_USER:-root}"
+QUIC_PORTS="${TJ_TEST_QUIC_PORTS:-7443-7452}"
+QUIC_PORT_RE='74(4[3-9]|5[0-2])'
 
 TSGW_SOCK="/var/run/tailscale/tailscaled.sock"
 IMAGE="tj-e2e:latest"
@@ -57,6 +62,19 @@ ok() { printf 'PASS: %s\n' "$*"; pass=$((pass + 1)); }
 bad() { printf 'FAIL: %s\n' "$*"; fail=$((fail + 1)); }
 
 rig() { podman exec "$CONTAINER" "$@"; }
+
+# remote_quic_listeners prints the UDP listeners of the remote in the QUIC
+# port range, one per line, as "address:port".
+remote_quic_listeners() {
+	ssh "${SSH_OPTS[@]}" "root@$1" 'ss -Hlun' 2>/dev/null | awk '{print $4}' | grep -E ":${QUIC_PORT_RE}\$" || true
+}
+
+# remote_helper_count prints the number of tj-helper processes on a remote.
+# The anchor keeps the tailscaled ssh incubator, whose command line quotes
+# the exec command, and the ssh command's own shell from matching.
+remote_helper_count() {
+	ssh "${SSH_OPTS[@]}" "root@$1" "pgrep -fc '^/[^ ]*/tj-helper\.'" 2>/dev/null || true
+}
 
 cleanup() {
 	log "cleanup"
@@ -273,6 +291,52 @@ case "$journal" in
 *'session down'*) ok "scenario B: the journal has the graceful shutdown log line" ;;
 *) bad "scenario B: the journal has no graceful shutdown log line" ;;
 esac
+
+log "scenario C: tj connect --transport ssh --dns none, then a hard kill of the session process"
+rig tj -v connect "$TJ_TEST_REF" --user "$TJ_TEST_USER" --dns none --transport ssh
+
+if wait_present 5 ip link show tj0; then
+	ok "scenario C: session up: tj0 exists"
+else
+	bad "scenario C: session up: tj0 does not exist"
+fi
+if wait_tj0_route present 5; then
+	ok "scenario C: session up: at least one dev tj0 route exists"
+else
+	bad "scenario C: session up: no dev tj0 route exists"
+	rig sh -c 'ip route show; ip -6 route show'
+fi
+
+HELPERS="$(remote_helper_count "$TJ_TEST_REMOTE")"
+if [ "$HELPERS" -eq 3 ]; then
+	ok "scenario C: the remote has 3 helper processes"
+else
+	bad "scenario C: the remote has ${HELPERS} helper processes, want 3"
+fi
+
+pid="$(rig systemctl show tj-session -p MainPID --value)"
+if [ -z "$pid" ] || [ "$pid" = "0" ]; then
+	printf 'FATAL: could not read the tj-session MainPID\n'
+	exit 1
+fi
+ok "scenario C: read the session's MainPID ($pid)"
+rig kill -9 "$pid"
+
+log "scenario C: confirm the ExecStopPost cleanup ran"
+assert_clean "scenario C"
+
+HELPERS="$(remote_helper_count "$TJ_TEST_REMOTE")"
+if [ "$HELPERS" -eq 0 ]; then
+	ok "scenario C: no helper process remains on the remote"
+else
+	bad "scenario C: ${HELPERS} helper processes remain on the remote"
+fi
+LISTENERS="$(remote_quic_listeners "$TJ_TEST_REMOTE")"
+if [ -z "$LISTENERS" ]; then
+	ok "scenario C: no udp listener in ${QUIC_PORTS} remains on the remote"
+else
+	bad "scenario C: udp listeners remain on the remote: ${LISTENERS}"
+fi
 
 log "confirm the rig left no tj0 route on the host"
 host_tj0_after="$(ip route show 2>/dev/null | grep 'dev tj0' || true)"

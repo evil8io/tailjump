@@ -32,6 +32,9 @@ type Plan struct {
 	// Protocols is the set the client forwards, for example "tcp,udp,icmp".
 	// An empty value means all three.
 	Protocols string `json:"protocols"`
+	// SingleLane keeps the SSH transport on the primary lane alone. It is a
+	// measurement knob; connect sets it from TJ_SSH_LANES.
+	SingleLane bool `json:"single_lane,omitempty"`
 }
 
 // Session status values in the state file.
@@ -64,4 +67,7 @@ type State struct {
 	Fallback  string `json:"fallback,omitempty"`
 	// Protocols is the set the session forwards.
 	Protocols string `json:"protocols"`
+	// Lanes are the SSH connections that opened, in the order tcp, udp,
+	// icmp, dns. It is empty on the QUIC transport.
+	Lanes string `json:"lanes,omitempty"`
 }

@@ -114,7 +114,7 @@ type ProbeResult struct {
 // Probe uploads the helper, asks it for its echo socket, negotiates the
 // QUIC transport, dials it, and tears everything down.
 func Probe(ctx context.Context, client *sshc.Client, arch string, addr netip.Addr, ports transport.PortRange, up, down uint64) (ProbeResult, error) {
-	muxClient, err := startHelper(client, arch)
+	muxClient, _, err := startHelper(client, arch)
 	if err != nil {
 		return ProbeResult{}, err
 	}

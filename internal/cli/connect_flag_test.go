@@ -64,3 +64,32 @@ func TestCheckDNSProtocols(t *testing.T) {
 		}
 	}
 }
+
+// TestSingleLaneKnob locks in the measurement knob: 1 keeps the SSH
+// transport on one lane, unset opens the lanes, and any other value is an
+// error that names the variable.
+func TestSingleLaneKnob(t *testing.T) {
+	cases := []struct {
+		value string
+		want  bool
+		ok    bool
+	}{
+		{"", false, true},
+		{"1", true, true},
+		{"0", false, false},
+		{"true", false, false},
+	}
+	for _, c := range cases {
+		t.Setenv("TJ_SSH_LANES", c.value)
+		got, err := singleLaneKnob()
+		if (err == nil) != c.ok {
+			t.Fatalf("singleLaneKnob() with %q = %v, want ok=%v", c.value, err, c.ok)
+		}
+		if got != c.want {
+			t.Fatalf("singleLaneKnob() with %q = %v, want %v", c.value, got, c.want)
+		}
+		if err != nil && !strings.Contains(err.Error(), "TJ_SSH_LANES") {
+			t.Fatalf("error %q does not name TJ_SSH_LANES", err)
+		}
+	}
+}
