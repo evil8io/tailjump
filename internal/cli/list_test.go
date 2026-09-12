@@ -12,9 +12,9 @@ func TestPathOf(t *testing.T) {
 		peer tailnet.Peer
 		want string
 	}{
-		{tailnet.Peer{Active: true, CurAddr: "[2001:db8::2]:41641", Relay: "lhr"}, "direct"},
-		{tailnet.Peer{Active: true, Relay: "lhr"}, "relay lhr"},
-		{tailnet.Peer{Active: false, Relay: "lhr"}, "idle"},
+		{tailnet.Peer{Active: true, CurAddr: "[2001:db8::2]:41641", Relay: "xyz"}, "direct"},
+		{tailnet.Peer{Active: true, Relay: "xyz"}, "relay xyz"},
+		{tailnet.Peer{Active: false, Relay: "xyz"}, "idle"},
 	}
 	for _, c := range cases {
 		if got := pathOf(c.peer).String(); got != c.want {
