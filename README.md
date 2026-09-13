@@ -3,6 +3,18 @@
 `tj` creates a point-to-site VPN tunnel to any Tailscale peer with Tailscale
 SSH enabled. It is inspired by [sshuttle](https://github.com/sshuttle/sshuttle).
 
+## Why
+
+Tailscale lets clients [accept routes from subnet routers](https://tailscale.com/kb/1019/subnets).
+However, this means accepting all routes advertised by all routers. This makes
+it impossible to connect to the networks of Tailscale peers whose networks
+have overlapping CIDRs. `tj` acts like a traditional proxy VPN, granting the
+client access to a single peer's network. See
+[tailscale#18451](https://github.com/tailscale/tailscale/issues/18451),
+[tailscale#19590](https://github.com/tailscale/tailscale/issues/19590),
+[tailscale#10206](https://github.com/tailscale/tailscale/issues/10206), and
+[tailscale#16323](https://github.com/tailscale/tailscale/issues/16323).
+
 ## How it works
 
 * Tailscale SSH authenticates the remote. The session uploads a helper binary
