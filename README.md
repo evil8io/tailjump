@@ -5,34 +5,18 @@ SSH enabled. It is inspired by [sshuttle](https://github.com/sshuttle/sshuttle).
 
 ## Why
 
-A Tailscale client accepts all approved subnet routes or none. Two remotes
-that reach networks with the same CIDR, for example the `10.0.0.0/16` of two
-environments, cannot both serve it: Tailscale treats two routers with the same
-prefix as a failover pair and picks one. Tailscale's answer is
-[4via6](https://tailscale.com/kb/1201/4via6-subnets), which maps each subnet
-to an IPv6 range and needs IPv6 in the client and in its programs.
+A Tailscale client accepts all approved subnet routes or none, so two remotes
+that reach networks with the same CIDR cannot both serve it. Tailscale's
+answer is [4via6](https://tailscale.com/kb/1201/4via6-subnets), which needs
+IPv6 in the client and in its programs. A `tj` session routes the networks of
+one remote for its duration, and the remote advertises no routes.
 
-`tj` routes per session instead. The engineer picks the remote at `connect`,
-the session installs the networks of that remote only, and `disconnect`
-removes them. The remote advertises no routes and needs no approval in the
-admin console.
-
-Open Tailscale issues on the subject, checked on 2026-09-13:
-
-* [#18451](https://github.com/tailscale/tailscale/issues/18451): accept routes
-  from selected nodes only; three sites with the same CIDR.
-* [#19590](https://github.com/tailscale/tailscale/issues/19590): an allow and
-  a deny list for accepted routes. A maintainer wrote on 2026-06-02 that
-  Tailscale wants the feature, and that the question is prioritization.
-* [#10206](https://github.com/tailscale/tailscale/issues/10206): accept a
-  predefined set of routes.
-* [#16323](https://github.com/tailscale/tailscale/issues/16323): overlapping
-  subnet routes.
-
-Tailscale closed the first requests,
-[#587](https://github.com/tailscale/tailscale/issues/587) and
-[#286](https://github.com/tailscale/tailscale/issues/286), with 4via6 as the
-answer.
+* [tailscale#18451](https://github.com/tailscale/tailscale/issues/18451) Allow clients to selectively accept routes advertised by other nodes
+* [tailscale#19590](https://github.com/tailscale/tailscale/issues/19590) Allow selective acceptance of subnet routes
+* [tailscale#10206](https://github.com/tailscale/tailscale/issues/10206) Accept only a predefined set of advertised routes
+* [tailscale#16323](https://github.com/tailscale/tailscale/issues/16323) Support for Overlapping Subnet Routes
+* [tailscale#587](https://github.com/tailscale/tailscale/issues/587) Accept only a subset of advertised routes (closed)
+* [tailscale#286](https://github.com/tailscale/tailscale/issues/286) Control of advertised routes to nodes (closed)
 
 ## How it works
 
