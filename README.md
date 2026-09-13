@@ -5,18 +5,15 @@ SSH enabled. It is inspired by [sshuttle](https://github.com/sshuttle/sshuttle).
 
 ## Why
 
-A Tailscale client accepts all approved subnet routes or none, so two remotes
-that reach networks with the same CIDR cannot both serve it. Tailscale's
-answer is [4via6](https://tailscale.com/kb/1201/4via6-subnets), which needs
-IPv6 in the client and in its programs. A `tj` session routes the networks of
-one remote for its duration, and the remote advertises no routes.
-
-* [tailscale#18451](https://github.com/tailscale/tailscale/issues/18451) Allow clients to selectively accept routes advertised by other nodes
-* [tailscale#19590](https://github.com/tailscale/tailscale/issues/19590) Allow selective acceptance of subnet routes
-* [tailscale#10206](https://github.com/tailscale/tailscale/issues/10206) Accept only a predefined set of advertised routes
-* [tailscale#16323](https://github.com/tailscale/tailscale/issues/16323) Support for Overlapping Subnet Routes
-* [tailscale#587](https://github.com/tailscale/tailscale/issues/587) Accept only a subset of advertised routes (closed)
-* [tailscale#286](https://github.com/tailscale/tailscale/issues/286) Control of advertised routes to nodes (closed)
+Tailscale lets clients [accept routes from subnet routers](https://tailscale.com/kb/1019/subnets).
+However, this means accepting all routes advertised by all routers. This makes
+it impossible to connect to the networks of Tailscale peers whose networks
+have overlapping CIDRs. `tj` acts like a traditional proxy VPN, granting the
+client access to a single peer's network. See
+[tailscale#18451](https://github.com/tailscale/tailscale/issues/18451),
+[tailscale#19590](https://github.com/tailscale/tailscale/issues/19590),
+[tailscale#10206](https://github.com/tailscale/tailscale/issues/10206), and
+[tailscale#16323](https://github.com/tailscale/tailscale/issues/16323).
 
 ## How it works
 
