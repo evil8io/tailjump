@@ -5,3 +5,7 @@ internal/helper/embed/bin/tj-helper-*
 
 # local e2e target, never committed
 test/e2e/target.env
+
+# third-party agent skills, installed locally
+/.claude/skills/
+/skills-lock.json
