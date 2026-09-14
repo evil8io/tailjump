@@ -50,9 +50,10 @@ type Plan struct {
 
 // Session status values in the state file.
 const (
-	StatusStarting = "starting"
-	StatusUp       = "up"
-	StatusStopping = "stopping"
+	StatusStarting     = "starting"
+	StatusUp           = "up"
+	StatusReconnecting = "reconnecting"
+	StatusStopping     = "stopping"
 )
 
 // Transport values in the state file.
@@ -61,9 +62,22 @@ const (
 	TransportSSH  = "ssh"
 )
 
+// ReconnectState is the progress of a session that lost its transport and
+// rebuilds it. tj status prints it, and tj connect reads the attempt count.
+type ReconnectState struct {
+	// Since is the RFC 3339 time of the loss.
+	Since    string `json:"since"`
+	Attempts int    `json:"attempts"`
+	// Reason is the loss, or the failure of the last attempt.
+	Reason string `json:"reason"`
+}
+
 // State is the JSON that the running session writes for tj status.
 type State struct {
-	Remote    string   `json:"remote"`
+	Remote string `json:"remote"`
+	// Ref is the reference the session resolves, a hostname or a tag. tj
+	// connect matches it while a reconnect moves the address.
+	Ref       string   `json:"ref"`
 	Addr      string   `json:"addr"`
 	User      string   `json:"user"`
 	Networks  []string `json:"networks"`
@@ -81,4 +95,9 @@ type State struct {
 	// Lanes are the SSH connections that opened, in the order tcp, udp,
 	// icmp, dns. It is empty on the QUIC transport.
 	Lanes string `json:"lanes,omitempty"`
+	// Reconnect is set while the status is reconnecting.
+	Reconnect *ReconnectState `json:"reconnect,omitempty"`
+	// Reconnects counts the losses the session recovered from. It survives a
+	// reconnect, so tj status reports the whole session.
+	Reconnects int `json:"reconnects,omitempty"`
 }

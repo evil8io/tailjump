@@ -52,6 +52,27 @@ func selectTransport(ctx context.Context, muxClient *mux.Client, addr netip.Addr
 	return nil, nil
 }
 
+// redialQUIC brings the QUIC transport up again on a reconnect attempt. The
+// session keeps the transport it started with, so a helper that cannot
+// listen fails the attempt instead of falling back to the SSH transport.
+func redialQUIC(ctx context.Context, muxClient *mux.Client, addr netip.Addr, plan *Plan) (*mux.QUICClient, error) {
+	ports, err := plan.quicPorts()
+	if err != nil {
+		return nil, err
+	}
+	q, reason, err := dialQUIC(ctx, muxClient, addr, ports,
+		transport.ControllerNamed(plan.Controller, plan.BandwidthUp),
+		transport.ControllerNamed(plan.Controller, plan.BandwidthDown))
+	if err != nil {
+		return nil, err
+	}
+	if q == nil {
+		return nil, fmt.Errorf("quic transport unavailable: %s", reason)
+	}
+	slog.Info("quic transport up", "port", q.Port())
+	return q, nil
+}
+
 // policyHint names the tailnet policy rule the QUIC transport needs, for the
 // fallback warning.
 func policyHint(ports transport.PortRange, remote string) string {

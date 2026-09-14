@@ -55,12 +55,15 @@ func runStatus(cmd *cobra.Command, _ []string) error {
 	tw := tabwriter.NewWriter(w, 0, 4, 2, ' ', 0)
 	_, _ = fmt.Fprintf(tw, "Remote:\t%s (%s)\n", st.Remote, st.Addr)
 	_, _ = fmt.Fprintf(tw, "User:\t%s\n", st.User)
-	_, _ = fmt.Fprintf(tw, "Status:\t%s\n", st.Status)
+	_, _ = fmt.Fprintf(tw, "Status:\t%s\n", st.StatusLine())
 	_, _ = fmt.Fprintf(tw, "Transport:\t%s\n", st.TransportLine())
 	_, _ = fmt.Fprintf(tw, "Path:\t%s\n", path)
 	_, _ = fmt.Fprintf(tw, "Protocols:\t%s\n", valueOrDash(st.Protocols))
 	_, _ = fmt.Fprintf(tw, "DNS mode:\t%s\n", st.DNS.Mode)
 	_, _ = fmt.Fprintf(tw, "Uptime:\t%s\n", st.Uptime())
+	if st.Reconnects > 0 {
+		_, _ = fmt.Fprintf(tw, "Reconnects:\t%d\n", st.Reconnects)
+	}
 	_, _ = fmt.Fprintf(tw, "Networks:\t%s\n", joinOrNone(st.Networks))
 	return tw.Flush()
 }

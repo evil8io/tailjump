@@ -54,7 +54,26 @@ func (s *State) TransportLine() string {
 
 // Uptime is the time since the session started, rounded to a second.
 func (s *State) Uptime() string {
-	t, err := time.Parse(time.RFC3339, s.StartedAt)
+	return sinceText(s.StartedAt)
+}
+
+// StatusLine is the status of the session in one line. A reconnecting
+// session adds the attempt, the time since the loss, and the reason, for
+// example "reconnecting (attempt 3, 40s; quic connection closed)".
+func (s *State) StatusLine() string {
+	if s.Status != StatusReconnecting || s.Reconnect == nil {
+		return s.Status
+	}
+	line := fmt.Sprintf("%s (attempt %d, %s", s.Status, s.Reconnect.Attempts, sinceText(s.Reconnect.Since))
+	if s.Reconnect.Reason != "" {
+		line += "; " + s.Reconnect.Reason
+	}
+	return line + ")"
+}
+
+// sinceText is the time since an RFC 3339 stamp, rounded to a second.
+func sinceText(stamp string) string {
+	t, err := time.Parse(time.RFC3339, stamp)
 	if err != nil {
 		return "unknown"
 	}
