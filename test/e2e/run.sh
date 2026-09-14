@@ -180,8 +180,11 @@ log "build the rig image"
 podman build -t "$IMAGE" -f "$DIR/Containerfile" "$DIR"
 
 log "start the rig"
+# --dns-search=. drops the search domains of the host, so a tj session on the
+# host does not give the rig's default link the domain of the split DNS check.
 podman run -d --name "$CONTAINER" \
 	--systemd=always \
+	--dns-search=. \
 	--device /dev/net/tun \
 	--cap-add NET_ADMIN --cap-add NET_RAW --cap-add SYS_ADMIN \
 	-v "${TSGW_SOCK}:${TSGW_SOCK}" \
@@ -326,15 +329,33 @@ else
 	bad "icmp traceroute did not reach ${GW_V4} at hop 1"
 fi
 
-log "one-session lock: a second connect must refuse"
-if rig tj connect "$TJ_TEST_REF" --user "$TJ_TEST_USER" --dns none; then
-	bad "the second connect did not refuse"
+log "one-session lock: a second connect to the active remote reports already up and keeps the unit"
+INVOCATION="$(rig systemctl show -p InvocationID tj-session)"
+code=0
+AGAIN="$(rig tj connect "$TJ_TEST_REF" --user "$TJ_TEST_USER" --dns none 2>&1)" || code=$?
+printf '%s\n' "$AGAIN"
+if [ "$code" -eq 0 ] && printf '%s' "$AGAIN" | grep -q 'already up'; then
+	ok "the second connect exited 0 with already up"
 else
-	code=$?
-	if [ "$code" -eq 3 ]; then
-		ok "the second connect refused with exit code 3"
+	bad "the second connect exited ${code}, want 0 with already up"
+fi
+if [ "$(rig systemctl show -p InvocationID tj-session)" = "$INVOCATION" ]; then
+	ok "the session unit kept its invocation"
+else
+	bad "the second connect restarted the session unit"
+fi
+
+if [ -n "${TJ_TEST_DERP_REF:-}" ]; then
+	log "one-session lock: a connect to a different remote must refuse"
+	if rig tj connect "$TJ_TEST_DERP_REF" --user root --dns none; then
+		bad "the connect to a different remote did not refuse"
 	else
-		bad "the second connect failed with exit ${code}, want 3"
+		code=$?
+		if [ "$code" -eq 3 ]; then
+			ok "the connect to a different remote refused with exit code 3"
+		else
+			bad "the connect to a different remote failed with exit ${code}, want 3"
+		fi
 	fi
 fi
 
@@ -743,7 +764,7 @@ fi
 log "tj doctor reports the echo socket of the gateway"
 DOCTOR="$(rig tj doctor "$TJ_TEST_REF" --user "$TJ_TEST_USER" 2>/dev/null || true)"
 printf '%s\n' "$DOCTOR"
-if printf '%s\n' "$DOCTOR" | grep -E '^icmp echo socket:' | grep -qE 'raw socket|ping socket'; then
+if printf '%s\n' "$DOCTOR" | grep -E 'icmp echo socket' | grep -qE 'raw socket|ping socket'; then
 	ok "doctor shows the echo socket of the gateway"
 else
 	bad "doctor does not show an echo socket for the gateway"
