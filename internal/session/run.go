@@ -500,16 +500,21 @@ func (r *runner) dropTransport() {
 // closeTransport closes the parts of one transport without the quit verb.
 // The peer of a lost transport is gone, and a control write would then wait
 // for the yamux write timeout.
+//
+// The SSH connection closes before the mux. A Close on an SSH channel does
+// not end a Read that waits for data, and a yamux Close waits for its
+// receive loop, so the mux of a dead peer closes only when the connection
+// under it is gone.
 func closeTransport(q *mux.QUICClient, lanes *laneSet, muxClient *mux.Client, client *sshc.Client) {
 	if q != nil {
 		_ = q.Close()
 	}
+	if client != nil {
+		_ = client.Close()
+	}
 	lanes.close()
 	if muxClient != nil {
 		_ = muxClient.Close()
-	}
-	if client != nil {
-		_ = client.Close()
 	}
 }
 
