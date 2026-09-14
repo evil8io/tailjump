@@ -213,6 +213,7 @@ for transport in $TRANSPORTS; do
 	connect_s="$(awk -v s="$start" -v e="$end" 'BEGIN { printf "%.1f", (e - s) / 1e9 }')"
 	status_line="$(rig tj status | grep -E '^Transport:' | sed -E 's/^Transport:[[:space:]]+//')"
 	printf 'connect took %s s, status transport: %s\n' "$connect_s" "$status_line"
+	invocation="$(rig systemctl show -p InvocationID --value tj-session 2>/dev/null | tr -d '\r' || true)"
 
 	shape_on
 
@@ -281,6 +282,12 @@ for transport in $TRANSPORTS; do
 	if [ -n "$journal_notes" ]; then
 		printf 'journal notes:\n%s\n' "$journal_notes"
 	fi
+	# The rig keeps the journal of every run of the unit, so the loss count
+	# reads the run of this session only.
+	reconnects="$(rig tj status 2>/dev/null | sed -n 's/^Reconnects:[[:space:]]*//p')"
+	reconnects="${reconnects:-0}"
+	lost="$(rig journalctl --no-pager "_SYSTEMD_INVOCATION_ID=${invocation}" 2>/dev/null | grep -c 'session lost' || true)"
+	printf 'reconnects: %s, session lost lines: %s\n' "$reconnects" "$lost"
 	rig tj disconnect
 	sleep 2
 
@@ -293,8 +300,9 @@ for transport in $TRANSPORTS; do
 	printf '| UDP DNS query time p50 / p95 | %s ms / %s ms |\n' "$dns_p50" "$dns_p95"
 	printf '| Bulk IPv4 median Mbit/s (runs:%s) | %s |\n' "$bulk4_runs" "$bulk4"
 	printf '| Bulk IPv6 median Mbit/s (runs:%s) | %s |\n' "$bulk6_runs" "$bulk6"
-	printf 'RESULT target=%s transport=%s controller=%s loss=%s delay=%s label=%q connect_s=%s p50=%s p95=%s failed=%s dns=%s dns_p50=%s dns_p95=%s bulk4=%s bulk6=%s\n' \
-		"$TARGET" "$transport" "${TJ_QUIC_CONTROLLER:-default}" "$LOSS" "$DELAY" "$LABEL" "$connect_s" "$connect_p50" "$connect_p95" "$connect_failed" "$dns_ok" "$dns_p50" "$dns_p95" "$bulk4" "$bulk6"
+	printf '| Reconnects / session lost lines | %s / %s |\n' "$reconnects" "$lost"
+	printf 'RESULT target=%s transport=%s controller=%s loss=%s delay=%s label=%q connect_s=%s p50=%s p95=%s failed=%s dns=%s dns_p50=%s dns_p95=%s bulk4=%s bulk6=%s reconnects=%s lost=%s\n' \
+		"$TARGET" "$transport" "${TJ_QUIC_CONTROLLER:-default}" "$LOSS" "$DELAY" "$LABEL" "$connect_s" "$connect_p50" "$connect_p95" "$connect_failed" "$dns_ok" "$dns_p50" "$dns_p95" "$bulk4" "$bulk6" "$reconnects" "$lost"
 done
 
 log "confirm the remote is clean"
