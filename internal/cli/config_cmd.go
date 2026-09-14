@@ -101,9 +101,10 @@ func newConfigGetCmd() *cobra.Command {
 
 func newConfigSetCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "set <key> <value>",
-		Short: "Set defaults.user, defaults.dns, defaults.transport, defaults.protocols, or exclude",
-		Args:  cobra.ExactArgs(2),
+		Use:               "set <key> <value>",
+		Short:             "Set defaults.user, defaults.dns, defaults.transport, defaults.protocols, or exclude",
+		Args:              cobra.ExactArgs(2),
+		ValidArgsFunction: completeConfigSetValue,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			key, value := args[0], args[1]
 			path := localConfigPath()
@@ -152,9 +153,10 @@ func newConfigSetCmd() *cobra.Command {
 
 func newConfigUnsetCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "unset <key>",
-		Short: "Clear defaults.user, defaults.dns, defaults.transport, defaults.protocols, or exclude",
-		Args:  cobra.ExactArgs(1),
+		Use:               "unset <key>",
+		Short:             "Clear defaults.user, defaults.dns, defaults.transport, defaults.protocols, or exclude",
+		Args:              cobra.ExactArgs(1),
+		ValidArgsFunction: completeConfigKey,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			key := args[0]
 			path := localConfigPath()

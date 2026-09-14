@@ -27,11 +27,12 @@ const exitActiveSession = 3
 
 func newConnectCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:     "connect <remote>",
-		Aliases: []string{"up"},
-		Short:   "Start a session into the remote's network",
-		Args:    cobra.ExactArgs(1),
-		RunE:    runConnect,
+		Use:               "connect <remote>",
+		Aliases:           []string{"up"},
+		Short:             "Start a session into the remote's network",
+		Args:              cobra.ExactArgs(1),
+		RunE:              runConnect,
+		ValidArgsFunction: completeRemote,
 	}
 	cmd.Flags().String("user", "", "the SSH user")
 	cmd.Flags().Var(&dnsModeValue{}, "dns", "the DNS mode")
@@ -43,6 +44,7 @@ func newConnectCmd() *cobra.Command {
 	cmd.Flags().Bool("replace", false, "end the active session first")
 	cmd.Flags().Bool("dry-run", false, "print the plan and exit, without a session")
 	cmd.Flags().Bool("json", false, "print the plan as JSON; needs --dry-run")
+	registerRemoteFlagCompletions(cmd)
 	return cmd
 }
 

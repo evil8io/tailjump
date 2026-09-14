@@ -52,6 +52,8 @@ func newListCmd() *cobra.Command {
 	cmd.Flags().Bool("path", false, "ping each idle peer to learn whether its path is direct or relayed")
 	cmd.Flags().String("user", "", "the SSH user for --probe")
 	cmd.Flags().Bool("json", false, "print JSON output")
+	_ = cmd.RegisterFlagCompletionFunc("tag", completeTag)
+	_ = cmd.RegisterFlagCompletionFunc("user", cobra.NoFileCompletions)
 	return cmd
 }
 

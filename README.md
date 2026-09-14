@@ -66,6 +66,16 @@ tj disconnect
 `<remote>` is a hostname, a tag, or an alias from `tj alias`. `tj --help`
 lists every command and alias.
 
+`tj` completes remotes, aliases, config keys, and flag values. Install the
+completion script for your shell.
+
+```
+tj completion bash > /etc/bash_completion.d/tj
+tj completion zsh > "${fpath[1]}/_tj"
+tj completion fish > ~/.config/fish/completions/tj.fish
+tj completion powershell > tj.ps1
+```
+
 ## Docs
 
 * [`docs/spec.md`](docs/spec.md): the v1 spec.

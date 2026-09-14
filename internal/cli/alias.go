@@ -80,9 +80,10 @@ func newAliasListCmd() *cobra.Command {
 
 func newAliasShowCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "show <alias>",
-		Short: "Show one config alias",
-		Args:  cobra.ExactArgs(1),
+		Use:               "show <alias>",
+		Short:             "Show one config alias",
+		Args:              cobra.ExactArgs(1),
+		ValidArgsFunction: completeAlias,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			asJSON, _ := cmd.Flags().GetBool("json")
 			cfg, err := config.Load(localConfigPath())
@@ -149,9 +150,10 @@ func newAliasAddCmd() *cobra.Command {
 
 func newAliasSetCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "set <alias>",
-		Short: "Update an existing config alias",
-		Args:  cobra.ExactArgs(1),
+		Use:               "set <alias>",
+		Short:             "Update an existing config alias",
+		Args:              cobra.ExactArgs(1),
+		ValidArgsFunction: completeAlias,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			alias := args[0]
 			path := localConfigPath()
@@ -181,9 +183,10 @@ func newAliasSetCmd() *cobra.Command {
 
 func newAliasUnsetCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "unset <alias> <field>...",
-		Short: "Clear one or more fields of a config alias",
-		Args:  cobra.MinimumNArgs(2),
+		Use:               "unset <alias> <field>...",
+		Short:             "Clear one or more fields of a config alias",
+		Args:              cobra.MinimumNArgs(2),
+		ValidArgsFunction: completeAliasUnset,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			alias, fields := args[0], args[1:]
 			path := localConfigPath()
@@ -225,10 +228,11 @@ func newAliasUnsetCmd() *cobra.Command {
 
 func newAliasRmCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:     "remove <alias>",
-		Aliases: []string{"rm"},
-		Short:   "Remove a config alias",
-		Args:    cobra.ExactArgs(1),
+		Use:               "remove <alias>",
+		Aliases:           []string{"rm"},
+		Short:             "Remove a config alias",
+		Args:              cobra.ExactArgs(1),
+		ValidArgsFunction: completeAlias,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			alias := args[0]
 			path := localConfigPath()
@@ -257,6 +261,7 @@ func addRemoteFlags(cmd *cobra.Command) {
 	cmd.Flags().Var(&protocolSetValue{}, "protocols", "the protocols to forward")
 	cmd.Flags().StringArray("network", nil, "a CIDR to route for this remote, repeatable; replaces the whole list")
 	cmd.Flags().StringArray("exclude", nil, "a CIDR to exclude for this remote, repeatable; replaces the whole list")
+	registerRemoteFlagCompletions(cmd)
 }
 
 // remoteFromFlags returns base with the fields whose flags were set on cmd

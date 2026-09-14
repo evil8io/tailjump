@@ -21,13 +21,15 @@ import (
 
 func newDoctorCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "doctor [remote]",
-		Short: "Run the client checks, then the remote checks when a remote is given",
-		Args:  cobra.MaximumNArgs(1),
-		RunE:  runDoctor,
+		Use:               "doctor [remote]",
+		Short:             "Run the client checks, then the remote checks when a remote is given",
+		Args:              cobra.MaximumNArgs(1),
+		RunE:              runDoctor,
+		ValidArgsFunction: completeRemote,
 	}
 	cmd.Flags().String("user", "", "the SSH user")
 	cmd.Flags().Bool("json", false, "print JSON output")
+	_ = cmd.RegisterFlagCompletionFunc("user", cobra.NoFileCompletions)
 	return cmd
 }
 
