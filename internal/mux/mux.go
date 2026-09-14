@@ -52,7 +52,7 @@ const (
 	dialTimeout      = 10 * time.Second
 
 	keepAliveInterval = 5 * time.Second
-	connWriteTimeout  = 10 * time.Second
+	connWriteTimeout  = 20 * time.Second
 	maxStreamWindow   = 4 << 20
 
 	udpIdle    = 60 * time.Second
