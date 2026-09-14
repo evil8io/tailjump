@@ -5,10 +5,12 @@ import (
 	"os"
 	"os/exec"
 	"os/user"
+	"runtime"
 
 	"github.com/spf13/cobra"
 
 	"github.com/evil8io/tailjump/internal/session"
+	"github.com/evil8io/tailjump/internal/version"
 )
 
 const (
@@ -30,7 +32,18 @@ func newSetupCmd() *cobra.Command {
 
 func runSetup(cmd *cobra.Command) error {
 	out := cmd.OutOrStdout()
-	if err := checkTools(cmd); err != nil {
+	ctx := cmd.Context()
+
+	if err := session.CheckRootCopy(ctx); err == nil {
+		_, err := fmt.Fprintf(out, "setup is current (%s)\n", version.Version)
+		return err
+	}
+
+	rows := toolCheckRows()
+	if err := printDoctor(cmd, rows, false); err != nil {
+		return err
+	}
+	if err := doctorResult(rows); err != nil {
 		return err
 	}
 
@@ -53,27 +66,28 @@ func runSetup(cmd *cobra.Command) error {
 	return nil
 }
 
-// checkTools verifies the tools a session needs. systemd-run and /dev/net/tun
-// are required; resolvectl is only for split and all DNS, so a missing one is
-// a warning.
-func checkTools(cmd *cobra.Command) error {
-	out := cmd.OutOrStdout()
+// toolCheckRows checks the local tools a session needs. Linux needs
+// systemd-run to start the session unit and /dev/net/tun for the TUN
+// device; macOS needs neither. tj doctor and tj setup share the rows.
+func toolCheckRows() []doctorCheck {
+	if runtime.GOOS != "linux" {
+		return nil
+	}
+	return []doctorCheck{systemdRunCheck(), tunDeviceCheck()}
+}
+
+func systemdRunCheck() doctorCheck {
 	if _, err := exec.LookPath("systemd-run"); err != nil {
-		return fmt.Errorf("systemd-run is not on PATH; tj needs systemd to run a session")
+		return failCheck("systemd-run", fmt.Errorf("systemd-run is not on PATH; tj needs systemd to run a session"))
 	}
-	_, _ = fmt.Fprintln(out, "systemd-run: ok")
+	return okCheck("systemd-run", "ok")
+}
 
+func tunDeviceCheck() doctorCheck {
 	if _, err := os.Stat(tunPath); err != nil {
-		return fmt.Errorf("%s is missing; load the tun module", tunPath)
+		return failCheck(tunPath, fmt.Errorf("%s is missing; load the tun module", tunPath))
 	}
-	_, _ = fmt.Fprintln(out, tunPath+": ok")
-
-	if _, err := exec.LookPath("resolvectl"); err != nil {
-		_, _ = fmt.Fprintln(out, "resolvectl: absent (split and all DNS need systemd-resolved; none works without it)")
-	} else {
-		_, _ = fmt.Fprintln(out, "resolvectl: ok")
-	}
-	return nil
+	return okCheck(tunPath, "ok")
 }
 
 // installRoot copies the binary and writes the sudoers rule in one privileged
