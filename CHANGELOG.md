@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.6.0](https://github.com/evil8io/tailjump/compare/v1.5.0...v1.6.0) (2026-09-14)
+
+
+### Features
+
+* **cli:** improve the command-line experience ([#31](https://github.com/evil8io/tailjump/issues/31)) ([7c5a839](https://github.com/evil8io/tailjump/commit/7c5a8396a1e600a1802abd3ec90e1315775328b1))
+
 ## [1.5.0](https://github.com/evil8io/tailjump/compare/v1.4.0...v1.5.0) (2026-09-12)
 
 
