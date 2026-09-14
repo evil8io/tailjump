@@ -3,8 +3,11 @@
 package darwin
 
 import (
+	"bytes"
+	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -32,7 +35,8 @@ func logFilePath() string {
 
 // Start re-executes the running binary as "<self> _session run <plan>",
 // detached from the current session, and records its PID so a later,
-// separate process can find it again through Stop or Active.
+// separate process can find it again through Stop or Active. It truncates
+// the log file, so it has the log of this session only.
 func (r *Runner) Start(plan string) error {
 	self, err := os.Executable()
 	if err != nil {
@@ -41,7 +45,7 @@ func (r *Runner) Start(plan string) error {
 	if err := os.MkdirAll(runtimeDir, 0o755); err != nil {
 		return fmt.Errorf("create %s: %w", runtimeDir, err)
 	}
-	logFile, err := os.OpenFile(logFilePath(), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o640)
+	logFile, err := os.OpenFile(logFilePath(), os.O_TRUNC|os.O_CREATE|os.O_WRONLY, 0o640)
 	if err != nil {
 		return fmt.Errorf("open %s: %w", logFilePath(), err)
 	}
@@ -128,6 +132,39 @@ func isProcessGone(err error) bool {
 func clearPIDFile() error {
 	if err := os.Remove(pidFilePath()); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return fmt.Errorf("remove %s: %w", pidFilePath(), err)
+	}
+	return nil
+}
+
+// Logs writes session.log to w with tail, stopping the process when ctx
+// ends. lines 0 means the whole file. since is ignored: Start truncates the
+// file, so it always has the last session only. A missing file prints
+// nothing.
+func (r *Runner) Logs(ctx context.Context, w io.Writer, lines int, _ time.Time, follow bool) error {
+	path := logFilePath()
+	if _, err := os.Stat(path); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		return fmt.Errorf("stat %s: %w", path, err)
+	}
+
+	n := "+1"
+	if lines > 0 {
+		n = strconv.Itoa(lines)
+	}
+	args := []string{"-n", n}
+	if follow {
+		args = append(args, "-F")
+	}
+	args = append(args, path)
+
+	var stderr bytes.Buffer
+	cmd := exec.CommandContext(ctx, "tail", args...)
+	cmd.Stdout = w
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil && ctx.Err() == nil {
+		return fmt.Errorf("tail: %w: %s", err, strings.TrimSpace(stderr.String()))
 	}
 	return nil
 }

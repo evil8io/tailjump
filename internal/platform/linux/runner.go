@@ -3,11 +3,16 @@
 package linux
 
 import (
+	"bytes"
+	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
+	"time"
 )
 
 // unitName is the transient systemd unit that runs one session.
@@ -71,4 +76,30 @@ func (r *Runner) Active() (bool, error) {
 		return false, nil
 	}
 	return false, fmt.Errorf("systemctl is-active: %w", err)
+}
+
+// Logs writes the tj-session journal to w through journalctl, stopping the
+// process when ctx ends. lines 0 means every line; since zero means no
+// --since bound.
+func (r *Runner) Logs(ctx context.Context, w io.Writer, lines int, since time.Time, follow bool) error {
+	n := "all"
+	if lines > 0 {
+		n = strconv.Itoa(lines)
+	}
+	args := []string{"-u", unitName, "--no-pager", "-o", "short-iso", "-n", n}
+	if !since.IsZero() {
+		args = append(args, "--since", fmt.Sprintf("@%d", since.Unix()))
+	}
+	if follow {
+		args = append(args, "-f")
+	}
+
+	var stderr bytes.Buffer
+	cmd := exec.CommandContext(ctx, "journalctl", args...)
+	cmd.Stdout = w
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil && ctx.Err() == nil {
+		return fmt.Errorf("journalctl: %w: %s", err, strings.TrimSpace(stderr.String()))
+	}
+	return nil
 }

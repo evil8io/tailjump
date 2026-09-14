@@ -58,7 +58,7 @@ func waitForUp(ctx context.Context, plat platform.Platform) error {
 		}
 		active, err := plat.Runner.Active()
 		if err == nil && !active && time.Since(start) > 3*time.Second {
-			return errors.New("the session unit exited before it came up; see journalctl -u tj-session")
+			return errors.New("the session unit exited before it came up; see tj logs")
 		}
 		if time.Now().After(deadline) {
 			return fmt.Errorf("timed out after %s waiting for the session to come up", upTimeout)

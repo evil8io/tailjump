@@ -3,11 +3,14 @@
 package darwin
 
 import (
+	"bytes"
+	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strconv"
 	"testing"
+	"time"
 )
 
 func TestPidAndLogFilePaths(t *testing.T) {
@@ -117,5 +120,42 @@ func TestActiveAndStop(t *testing.T) {
 	}
 	if _, err := os.Stat(pidFilePath()); !os.IsNotExist(err) {
 		t.Error("pid file still exists after Stop")
+	}
+}
+
+func TestLogsNoFile(t *testing.T) {
+	withTempRuntimeDir(t)
+	r := &Runner{}
+	var buf bytes.Buffer
+	if err := r.Logs(context.Background(), &buf, 10, time.Time{}, false); err != nil {
+		t.Fatalf("Logs with no file: %v", err)
+	}
+	if buf.Len() != 0 {
+		t.Errorf("Logs with no file wrote %q, want empty", buf.String())
+	}
+}
+
+func TestLogsLines(t *testing.T) {
+	withTempRuntimeDir(t)
+	content := "line1\nline2\nline3\n"
+	if err := os.WriteFile(logFilePath(), []byte(content), 0o640); err != nil {
+		t.Fatalf("write log file: %v", err)
+	}
+	r := &Runner{}
+
+	var all bytes.Buffer
+	if err := r.Logs(context.Background(), &all, 0, time.Time{}, false); err != nil {
+		t.Fatalf("Logs lines=0: %v", err)
+	}
+	if all.String() != content {
+		t.Errorf("Logs lines=0 = %q, want %q", all.String(), content)
+	}
+
+	var last bytes.Buffer
+	if err := r.Logs(context.Background(), &last, 2, time.Time{}, false); err != nil {
+		t.Fatalf("Logs lines=2: %v", err)
+	}
+	if want := "line2\nline3\n"; last.String() != want {
+		t.Errorf("Logs lines=2 = %q, want %q", last.String(), want)
 	}
 }

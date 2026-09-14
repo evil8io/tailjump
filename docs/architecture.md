@@ -46,7 +46,7 @@ Module `github.com/evil8io/tailjump`, Go 1.27, CGO off on every target.
 
 ## Platform interfaces
 
-`internal/platform/platform.go` has one interface per concern. The Linux implementation is in `internal/platform/linux`, the macOS one in `internal/platform/darwin`, and the in-memory one in `internal/platform/fake`. Build tags select the real implementation, and `platform.New()` returns it. A chunk may extend an interface. The fake then follows in the same PR.
+`internal/platform/platform.go` has one interface per concern. The Linux implementation is in `internal/platform/linux`, the macOS one in `internal/platform/darwin`, and the in-memory one in `internal/platform/fake`. Build tags select the real implementation, and `platform.New()` returns it. A chunk may extend an interface. The fake then follows in the same PR. `linux` and `darwin` cannot import this package, because this package already imports them; a method whose interface signature names a type from here, for example `Logs` and `LogOptions`, reaches `linux.Runner` and `darwin.Runner` as plain arguments instead, and `platform_linux.go` and `platform_darwin.go` each wrap the concrete Runner to restore the interface shape.
 
 ```go
 type Device interface {
@@ -83,6 +83,18 @@ type Runner interface {
     Start(plan string) error
     Stop() error
     Active() (bool, error)
+    // Logs writes the session log to w, per opts. It stops when ctx ends and
+    // returns nil, not the process error, because the caller asked for the stop.
+    Logs(ctx context.Context, w io.Writer, opts LogOptions) error
+}
+
+// LogOptions selects the lines Runner.Logs writes: Lines is the last N lines,
+// 0 with a non-zero Since meaning every line since Since; Follow keeps
+// writing new lines until ctx ends; Since zero means no time limit.
+type LogOptions struct {
+    Lines  int
+    Follow bool
+    Since  time.Time
 }
 
 type Paths interface {
@@ -172,6 +184,8 @@ The root copy is root-owned, so the NOPASSWD rule does not point at a user-writa
 5. `_session start` waits up to 60 s for the state file with status `up` or for the unit to fail, and prints the result.
 6. `tj disconnect` runs `sudo -n /usr/local/libexec/tj/tj _session stop`, which runs `systemctl stop tj-session`.
 7. `_session cleanup` runs after every stop. It reverts the DNS on `tj0`, restores `/etc/resolv.conf` from the backup, deletes `tj0` when it exists, removes the session rules and flushes the session table, and removes the state and plan files. Every step is safe to repeat.
+
+On Linux the session logs to the journal of the unit `tj-session`. On macOS it logs to `RuntimeDir/session.log` (0640), and `Start` opens that file with `O_TRUNC`, so it has the log of the last session only. `tj logs` prints it on both platforms through `Runner.Logs`; an unprivileged caller reaches it the way `tj disconnect` reaches `_session stop`, through `sudo -n <root copy> _session logs`.
 
 The plan JSON: `{"remote":…,"addr":…,"user":…,"networks":[…],"dns":{"mode":…,"servers":[…],"domains":[…]},"helper_arch":…,"transport":"auto|quic|ssh","quic_ports":"7443-7452","bandwidth_up":0,"bandwidth_down":0,"protocols":"tcp,udp,icmp","single_lane":false}`. The bandwidths are bytes per second, zero for BBR. An empty `protocols` means all three. `single_lane` keeps the SSH transport on the primary lane, and `tj connect` sets it from `TJ_SSH_LANES`.
 
@@ -318,6 +332,7 @@ A remote's `networks` and `exclude` feed the session network computation: `netwo
 | 130 | SIGINT stopped the command. |
 * `log/slog` with a text handler on stderr. `-v` enables debug. The session unit logs to the journal through stderr.
 * `_remote` and `_session` are hidden commands.
+* `tj logs` prints the session log with `-n/--lines` (default 100, 0 for all) and `-f/--follow`. It works with no active session, and shows the log of the last session, the main use after a failed connect. The hidden `_session logs` adds `--since` (RFC 3339), for the tail S9 prints during a connect.
 * `tj doctor <remote>` reports: peer online, SSH ok, banner, manifest path or absent, exec dir, helper architecture, discovery ok, session networks non-empty, DNS mode availability, resolved available, sudo rule present, root copy version, the QUIC transport, and the echo socket of the remote: `raw socket`, `ping socket`, or `none`, with the `ping_group_range` value for the last two. It runs the manifest checks from the remote through the helper over a temporary mux, and from the client with a direct dial.
 * Timeouts: SSH dial 15 s, discovery exec 20 s, helper handshake 10 s, connect 90 s in total.
 * `tj list --path` sends up to 3 disco pings per remote through the local API, 200 ms apart, within 2 s, and stops at the first direct pong. A ping can time out while the remote moves data at the link rate: spike 9 measured 4 timeouts of 3 s during downloads at 550 Mbit/s with the session fine at the same moments. The flap detector of the session reads the status endpoint every 10 s and sends no ping, so it is unaffected.

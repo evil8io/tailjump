@@ -6,7 +6,10 @@
 package platform
 
 import (
+	"context"
+	"io"
 	"net/netip"
+	"time"
 
 	"golang.zx2c4.com/wireguard/tun"
 )
@@ -40,11 +43,22 @@ type Resolver interface {
 	Revert(device string) error
 }
 
+// LogOptions selects the lines Runner.Logs writes.
+type LogOptions struct {
+	Lines  int       // the last N lines; 0 with a non-zero Since means every line since Since
+	Follow bool      // keep writing new lines until ctx ends
+	Since  time.Time // zero means no time limit
+}
+
 type Runner interface {
 	// Start starts the session process detached with the plan file as its argument.
 	Start(plan string) error
 	Stop() error
 	Active() (bool, error)
+	// Logs writes the session log to w, per opts. It stops when ctx ends and
+	// returns nil, not the process error, because the caller asked for the
+	// stop.
+	Logs(ctx context.Context, w io.Writer, opts LogOptions) error
 }
 
 type Paths interface {

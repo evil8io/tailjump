@@ -3,9 +3,11 @@ package cli
 import (
 	"fmt"
 	"io"
+	"time"
 
 	"github.com/spf13/cobra"
 
+	"github.com/evil8io/tailjump/internal/platform"
 	"github.com/evil8io/tailjump/internal/session"
 )
 
@@ -27,6 +29,7 @@ func newSessionCmd() *cobra.Command {
 		newSessionRunCmd(),
 		newSessionStopCmd(),
 		newSessionCleanupCmd(),
+		newSessionLogsCmd(),
 	)
 	return cmd
 }
@@ -83,4 +86,34 @@ func newSessionCleanupCmd() *cobra.Command {
 			return session.Cleanup()
 		},
 	}
+}
+
+func newSessionLogsCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:    "logs",
+		Hidden: true,
+		Args:   cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			lines, _ := cmd.Flags().GetInt("lines")
+			follow, _ := cmd.Flags().GetBool("follow")
+			sinceFlag, _ := cmd.Flags().GetString("since")
+			var since time.Time
+			if sinceFlag != "" {
+				t, err := time.Parse(time.RFC3339, sinceFlag)
+				if err != nil {
+					return fmt.Errorf("invalid --since %q: %w", sinceFlag, err)
+				}
+				since = t
+			}
+			return platform.New().Runner.Logs(cmd.Context(), cmd.OutOrStdout(), platform.LogOptions{
+				Lines:  lines,
+				Follow: follow,
+				Since:  since,
+			})
+		},
+	}
+	cmd.Flags().IntP("lines", "n", 100, "the number of lines to print, 0 for all")
+	cmd.Flags().BoolP("follow", "f", false, "keep printing new lines until interrupted")
+	cmd.Flags().String("since", "", "print lines since this RFC 3339 time")
+	return cmd
 }

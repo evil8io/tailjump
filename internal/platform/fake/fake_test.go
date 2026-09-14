@@ -1,8 +1,11 @@
 package fake_test
 
 import (
+	"bytes"
+	"context"
 	"errors"
 	"net/netip"
+	"strings"
 	"testing"
 
 	"github.com/evil8io/tailjump/internal/platform"
@@ -140,6 +143,23 @@ func TestRunner(t *testing.T) {
 	}
 	if r.ActiveCalls != 1 {
 		t.Fatalf("ActiveCalls = %d, want 1", r.ActiveCalls)
+	}
+
+	opts := platform.LogOptions{Lines: 50, Follow: true}
+	var buf bytes.Buffer
+	if err := r.Logs(context.Background(), &buf, opts); err != nil {
+		t.Fatalf("Logs: %v", err)
+	}
+	if got := buf.String(); got != strings.Join(fake.LogLines, "\n")+"\n" {
+		t.Fatalf("Logs wrote %q, want the fake log lines", got)
+	}
+	if len(r.LogsCalls) != 1 || r.LogsCalls[0] != opts {
+		t.Fatalf("LogsCalls = %+v, want [%+v]", r.LogsCalls, opts)
+	}
+
+	r.LogsErr = errors.New("logs boom")
+	if err := r.Logs(context.Background(), &buf, opts); !errors.Is(err, r.LogsErr) {
+		t.Fatalf("Logs err = %v, want %v", err, r.LogsErr)
 	}
 }
 
