@@ -4,14 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log/slog"
-	"net/netip"
 	"strings"
 	"text/tabwriter"
 
 	"github.com/spf13/cobra"
 
-	"github.com/evil8io/tailjump/internal/config"
 	"github.com/evil8io/tailjump/internal/discovery"
 	"github.com/evil8io/tailjump/internal/dns"
 	"github.com/evil8io/tailjump/internal/helper"
@@ -90,7 +87,7 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 		return finishDoctor(cmd, checks, asJSON)
 	}
 
-	networks, err := doctorSessionNetworks(m, res, cfg, rr)
+	networks, _, err := sessionNetworks(m, res, cfg, rr, nil, nil)
 	if err == nil && len(networks) == 0 {
 		err = fmt.Errorf("the session network list is empty")
 	}
@@ -153,59 +150,7 @@ func decodeDoctorManifest(res *discovery.Result) (*manifest.Manifest, error) {
 	if err != nil {
 		return nil, err
 	}
-	if len(body) == 0 {
-		return manifest.Empty(), nil
-	}
-	return manifest.Parse(body)
-}
-
-// doctorSessionNetworks mirrors buildDescribeOutput's network computation,
-// so tj doctor and tj describe report the same session networks for the
-// same remote.
-func doctorSessionNetworks(m *manifest.Manifest, res *discovery.Result, cfg *config.Config, rr *resolvedRemote) ([]netip.Prefix, error) {
-	// Include the remote manifest and discovery, plus the remote-config
-	// networks; exclude the manifest, config, and remote-config excludes.
-	includeNetworks := append(append([]string{}, m.Networks...), rr.Config.Networks...)
-	manifestNetworks, err := manifest.ParsePrefixes(includeNetworks)
-	if err != nil {
-		return nil, fmt.Errorf("networks: %w", err)
-	}
-	manifestExclude, err := manifest.ParsePrefixes(m.Exclude)
-	if err != nil {
-		return nil, fmt.Errorf("manifest exclude: %w", err)
-	}
-	localExcludeList := append(append([]string{}, cfg.Exclude...), rr.Config.Exclude...)
-	localExclude, err := manifest.ParsePrefixes(localExcludeList)
-	if err != nil {
-		return nil, fmt.Errorf("local config exclude: %w", err)
-	}
-
-	var linkRoutes, cloudNets []netip.Prefix
-	if m.LinkRoutesEnabled() {
-		if linkRoutes, err = res.LinkRoutePrefixes(); err != nil {
-			return nil, fmt.Errorf("discovery link routes: %w", err)
-		}
-	}
-	if m.CloudEnabled() {
-		if cloudNets, err = res.CloudNetworkPrefixes(); err != nil {
-			return nil, fmt.Errorf("discovery cloud networks: %w", err)
-		}
-	}
-
-	networks, err := manifest.ComputeNetworks(manifest.Inputs{
-		ManifestNetworks:    manifestNetworks,
-		ManifestExclude:     manifestExclude,
-		DiscoveryLinkRoutes: linkRoutes,
-		DiscoveryCloud:      cloudNets,
-		RemoteAddrs:         rr.Peer.TailscaleIPs,
-		ClientConnected:     clientConnected(),
-		LocalExclude:        localExclude,
-	})
-	if err != nil {
-		return nil, err
-	}
-	slog.Debug("session networks", "count", len(networks), "networks", prefixStrings(networks))
-	return networks, nil
+	return decodeManifest(body)
 }
 
 func valueOrAbsent(s string) string {

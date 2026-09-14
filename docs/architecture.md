@@ -244,7 +244,9 @@ minus config.exclude and every --exclude
 minus 0.0.0.0/8, 127.0.0.0/8, 169.254.0.0/16, 224.0.0.0/3, ::1/128, fe80::/10, ff00::/8
 ```
 
-The result is the minimal sorted prefix list. `describe` prints the manifest, the discovery result, every exclusion, and the final list.
+The result is the minimal sorted prefix list. `internal/cli`'s `sessionNetworks` gathers these inputs from the manifest, the discovery result, the local config, the resolved remote, and the `--network` and `--exclude` flags. It then calls `ComputeNetworks`. `connect`, `describe`, and `doctor` share it, so they report the same session networks for the same remote. A nil discovery result means discovery did not run, or `--no-discovery` set its networks aside.
+
+`describe` prints the manifest, the discovery result, every exclusion, the final list, the DNS mode, the DNS servers, the DNS domains, and the transport. It resolves the DNS mode and the transport the way `connect` would, with no flag override. A DNS resolution error, for example a split mode without the manifest `dns.domains`, does not fail `describe`. `describe` prints the error text as the DNS mode value. `describe` is the tool that finds this problem.
 
 ### Discovery script output
 
@@ -320,7 +322,7 @@ A remote's `networks` and `exclude` feed the session network computation: `netwo
 
 ### CLI conventions
 
-* Human output through `text/tabwriter`. `--json` on `list`, `describe`, `status`, and `doctor`.
+* Human output through `text/tabwriter`. `--json` on `list`, `describe`, `status`, `doctor`, and `connect --dry-run`.
 * Errors are one line on stderr, `Error: <message>`. The exit code:
 
 | Code | Meaning |
@@ -334,6 +336,7 @@ A remote's `networks` and `exclude` feed the session network computation: `netwo
 * `_remote` and `_session` are hidden commands.
 * `tj logs` prints the session log with `-n/--lines` (default 100, 0 for all) and `-f/--follow`. It works with no active session, and shows the log of the last session, the main use after a failed connect. The hidden `_session logs` adds `--since` (RFC 3339), for the tail S9 prints during a connect.
 * `tj doctor <remote>` reports: peer online, SSH ok, banner, manifest path or absent, exec dir, helper architecture, discovery ok, session networks non-empty, DNS mode availability, resolved available, sudo rule present, root copy version, the QUIC transport, and the echo socket of the remote: `raw socket`, `ping socket`, or `none`, with the `ping_group_range` value for the last two. It runs the manifest checks from the remote through the helper over a temporary mux, and from the client with a direct dial.
+* `tj connect --dry-run` runs every step of the connect flow through the plan, prints it, and exits 0. It does not check for an active session and does not call sudo. The human layout matches `describe`: Remote, User, Transport, QUIC ports, Protocols, DNS mode, DNS servers, DNS domains, Helper arch, Networks. `--dry-run --json` prints the plan JSON, the same bytes `_session start` reads from stdin. `--json` without `--dry-run` is a usage error. The check runs before the remote resolution, so it needs no network access.
 * Timeouts: SSH dial 15 s, discovery exec 20 s, helper handshake 10 s, connect 90 s in total.
 * `tj list --path` sends up to 3 disco pings per remote through the local API, 200 ms apart, within 2 s, and stops at the first direct pong. A ping can time out while the remote moves data at the link rate: spike 9 measured 4 timeouts of 3 s during downloads at 550 Mbit/s with the session fine at the same moments. The flap detector of the session reads the status endpoint every 10 s and sends no ping, so it is unaffected.
 * `tj list --probe` opens SSH to at most 8 peers at a time, and prints them in the tailnet status order regardless of which probe finishes first. It caches no probe result: each run opens SSH again.

@@ -4,8 +4,8 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"net/netip"
 	"os"
+	"text/tabwriter"
 
 	"github.com/spf13/cobra"
 
@@ -40,6 +40,8 @@ func newConnectCmd() *cobra.Command {
 	cmd.Flags().StringArray("exclude", nil, "a CIDR to exclude from the session, repeatable")
 	cmd.Flags().Bool("no-discovery", false, "skip discovery")
 	cmd.Flags().Bool("replace", false, "end the active session first")
+	cmd.Flags().Bool("dry-run", false, "print the plan and exit, without a session")
+	cmd.Flags().Bool("json", false, "print the plan as JSON; needs --dry-run")
 	return cmd
 }
 
@@ -52,6 +54,11 @@ func runConnect(cmd *cobra.Command, args []string) error {
 	excludeFlags, _ := cmd.Flags().GetStringArray("exclude")
 	noDiscovery, _ := cmd.Flags().GetBool("no-discovery")
 	replace, _ := cmd.Flags().GetBool("replace")
+	dryRun, _ := cmd.Flags().GetBool("dry-run")
+	asJSON, _ := cmd.Flags().GetBool("json")
+	if asJSON && !dryRun {
+		return &ExitError{Code: 2, Err: errors.New("--json needs --dry-run")}
+	}
 
 	ctx := cmd.Context()
 	cfg, err := loadLocalConfig()
@@ -80,12 +87,46 @@ func runConnect(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	if dryRun {
+		return printPlan(cmd, plan, asJSON)
+	}
+
 	err = session.Connect(ctx, plan, replace, false)
 	var ae *session.ActiveError
 	if errors.As(err, &ae) {
 		return &ExitError{Code: exitActiveSession, Err: ae}
 	}
 	return err
+}
+
+// printPlan prints the plan that connect would hand to _session start. It
+// does not start a session. The human layout matches describe: asJSON
+// prints the exact bytes _session start reads from stdin.
+func printPlan(cmd *cobra.Command, plan *session.Plan, asJSON bool) error {
+	if asJSON {
+		b, err := plan.Marshal()
+		if err != nil {
+			return err
+		}
+		_, err = fmt.Fprintln(cmd.OutOrStdout(), string(b))
+		return err
+	}
+
+	w := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 4, 2, ' ', 0)
+	_, _ = fmt.Fprintf(w, "Remote:\t%s (%s)\n", plan.Remote, plan.Addr)
+	_, _ = fmt.Fprintf(w, "User:\t%s\n", plan.User)
+	_, _ = fmt.Fprintf(w, "Transport:\t%s\n", plan.Transport)
+	_, _ = fmt.Fprintf(w, "QUIC ports:\t%s\n", plan.QUICPorts)
+	_, _ = fmt.Fprintf(w, "Protocols:\t%s\n", plan.Protocols)
+	_, _ = fmt.Fprintf(w, "DNS mode:\t%s\n", plan.DNS.Mode)
+	_, _ = fmt.Fprintf(w, "DNS servers:\t%s\n", joinOrNone(plan.DNS.Servers))
+	_, _ = fmt.Fprintf(w, "DNS domains:\t%s\n", joinOrNone(plan.DNS.Domains))
+	_, _ = fmt.Fprintf(w, "Helper arch:\t%s\n", plan.HelperArch)
+	_, _ = fmt.Fprintln(w, "Networks:")
+	for _, n := range plan.Networks {
+		_, _ = fmt.Fprintf(w, "  %s\n", n)
+	}
+	return w.Flush()
 }
 
 // planFlags are the connect flags that shape the plan.
@@ -107,18 +148,20 @@ func buildPlan(client *sshc.Client, rr *resolvedRemote, cfg *config.Config, ref 
 		return nil, fmt.Errorf("discovery: %w", err)
 	}
 
-	m := manifest.Empty()
 	body, err := res.DecodedManifest()
 	if err != nil {
 		return nil, fmt.Errorf("decode manifest: %w", err)
 	}
-	if len(body) > 0 {
-		if m, err = manifest.Parse(body); err != nil {
-			return nil, fmt.Errorf("parse manifest: %w", err)
-		}
+	m, err := decodeManifest(body)
+	if err != nil {
+		return nil, fmt.Errorf("parse manifest: %w", err)
 	}
 
-	networks, err := connectNetworks(m, res, cfg, rr, flags.networks, flags.excludes, noDiscovery)
+	discForNetworks := res
+	if noDiscovery {
+		discForNetworks = nil
+	}
+	networks, _, err := sessionNetworks(m, discForNetworks, cfg, rr, flags.networks, flags.excludes)
 	if err != nil {
 		return nil, err
 	}
@@ -222,55 +265,11 @@ func transportMode(flag string, cfg *config.Config, ref string) transport.Mode {
 	return transport.Resolve(flag, cfg.Remotes[ref].Transport, cfg.Defaults.Transport)
 }
 
-func connectNetworks(m *manifest.Manifest, res *discovery.Result, cfg *config.Config, rr *resolvedRemote, networkFlags, excludeFlags []string, noDiscovery bool) ([]netip.Prefix, error) {
-	// Include the remote manifest and discovery, plus the remote-config and
-	// flag networks; exclude the manifest, config, remote-config, and flag
-	// excludes.
-	includeNetworks := append(append([]string{}, m.Networks...), rr.Config.Networks...)
-	includeNetworks = append(includeNetworks, networkFlags...)
-	manifestNetworks, err := manifest.ParsePrefixes(includeNetworks)
-	if err != nil {
-		return nil, fmt.Errorf("networks: %w", err)
-	}
-	manifestExclude, err := manifest.ParsePrefixes(m.Exclude)
-	if err != nil {
-		return nil, fmt.Errorf("manifest exclude: %w", err)
-	}
-	excludeList := append(append([]string{}, cfg.Exclude...), rr.Config.Exclude...)
-	excludeList = append(excludeList, excludeFlags...)
-	localExclude, err := manifest.ParsePrefixes(excludeList)
-	if err != nil {
-		return nil, fmt.Errorf("exclude: %w", err)
-	}
-
-	var linkRoutes, cloudNets []netip.Prefix
-	if !noDiscovery {
-		if m.LinkRoutesEnabled() {
-			if linkRoutes, err = res.LinkRoutePrefixes(); err != nil {
-				return nil, fmt.Errorf("discovery link routes: %w", err)
-			}
-		}
-		if m.CloudEnabled() {
-			if cloudNets, err = res.CloudNetworkPrefixes(); err != nil {
-				return nil, fmt.Errorf("discovery cloud networks: %w", err)
-			}
-		}
-	}
-
-	return manifest.ComputeNetworks(manifest.Inputs{
-		ManifestNetworks:    manifestNetworks,
-		ManifestExclude:     manifestExclude,
-		DiscoveryLinkRoutes: linkRoutes,
-		DiscoveryCloud:      cloudNets,
-		RemoteAddrs:         rr.Peer.TailscaleIPs,
-		ClientConnected:     clientConnected(),
-		LocalExclude:        localExclude,
-	})
-}
-
 // resolveDNS picks the mode by precedence (flag, remote config, defaults,
 // then the manifest default), and the servers and domains. The servers
 // default to the discovered resolvers, the domains to the manifest domains.
+// A nil res means no discovery ran, so the servers come from the manifest
+// only.
 func resolveDNS(dnsFlag string, cfg *config.Config, ref string, m *manifest.Manifest, res *discovery.Result) (dns.Mode, []string, []string, error) {
 	var domains []string
 	if m.DNS != nil {
@@ -281,7 +280,7 @@ func resolveDNS(dnsFlag string, cfg *config.Config, ref string, m *manifest.Mani
 	var servers []string
 	if m.DNS != nil && len(m.DNS.Servers) > 0 {
 		servers = m.DNS.Servers
-	} else {
+	} else if res != nil {
 		servers = res.Resolvers
 	}
 
