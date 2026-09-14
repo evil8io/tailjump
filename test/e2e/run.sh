@@ -180,8 +180,11 @@ log "build the rig image"
 podman build -t "$IMAGE" -f "$DIR/Containerfile" "$DIR"
 
 log "start the rig"
+# --dns-search=. drops the search domains of the host, so a tj session on the
+# host does not give the rig's default link the domain of the split DNS check.
 podman run -d --name "$CONTAINER" \
 	--systemd=always \
+	--dns-search=. \
 	--device /dev/net/tun \
 	--cap-add NET_ADMIN --cap-add NET_RAW --cap-add SYS_ADMIN \
 	-v "${TSGW_SOCK}:${TSGW_SOCK}" \
