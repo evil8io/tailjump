@@ -13,7 +13,7 @@ import (
 )
 
 // configKeys are the keys tj config set and tj config unset accept.
-var configKeys = []string{"defaults.user", "defaults.dns", "defaults.transport", "defaults.protocols", "exclude"}
+var configKeys = []string{"defaults.user", "defaults.dns", "defaults.transport", "defaults.protocols", "defaults.reconnect_for", "exclude"}
 
 // configLong is the shared part of the tj config and tj alias Long text. A
 // CLI write of either command group replaces the whole config file, so it
@@ -106,11 +106,12 @@ connect applies these values only when the flag and the matching alias field are
 func newConfigSetCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "set <key> <value>",
-		Short: "Set defaults.user, defaults.dns, defaults.transport, defaults.protocols, or exclude",
+		Short: "Set defaults.user, defaults.dns, defaults.transport, defaults.protocols, defaults.reconnect_for, or exclude",
 		Long: `tj config set <key> <value> sets one default or the global exclude list.
 connect applies a default only when the flag and the matching alias field are empty.`,
 		Example: `  tj config set defaults.dns split
   tj config set defaults.protocols tcp,udp
+  tj config set defaults.reconnect_for 10m
   tj config set exclude 10.0.0.0/16`,
 		Args:              cobra.ExactArgs(2),
 		ValidArgsFunction: completeConfigSetValue,
@@ -142,6 +143,12 @@ connect applies a default only when the flag and the matching alias field are em
 					return fmt.Errorf("invalid protocols %q, %w", value, err)
 				}
 				cfg.Defaults.Protocols = value
+			case "defaults.reconnect_for":
+				var v reconnectForValue
+				if err := v.Set(value); err != nil {
+					return fmt.Errorf("invalid reconnect_for %q, %w", value, err)
+				}
+				cfg.Defaults.ReconnectFor = value
 			case "exclude":
 				cidrs, err := parseCIDRList(value)
 				if err != nil {
@@ -163,7 +170,7 @@ connect applies a default only when the flag and the matching alias field are em
 func newConfigUnsetCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "unset <key>",
-		Short: "Clear defaults.user, defaults.dns, defaults.transport, defaults.protocols, or exclude",
+		Short: "Clear defaults.user, defaults.dns, defaults.transport, defaults.protocols, defaults.reconnect_for, or exclude",
 		Long: `tj config unset <key> clears one default or the global exclude list.
 An unknown key is a usage error, and the message lists the valid keys.`,
 		Args:              cobra.ExactArgs(1),
@@ -184,6 +191,8 @@ An unknown key is a usage error, and the message lists the valid keys.`,
 				cfg.Defaults.Transport = ""
 			case "defaults.protocols":
 				cfg.Defaults.Protocols = ""
+			case "defaults.reconnect_for":
+				cfg.Defaults.ReconnectFor = ""
 			case "exclude":
 				cfg.Exclude = nil
 			default:

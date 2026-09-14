@@ -67,6 +67,7 @@ type describeOutput struct {
 	User           string             `json:"user"`
 	Transport      string             `json:"transport"`
 	Protocols      string             `json:"protocols"`
+	ReconnectFor   string             `json:"reconnect_for"`
 	DNS            describeDNS        `json:"dns"`
 	ManifestSource string             `json:"manifest_source"`
 	Manifest       *manifest.Manifest `json:"manifest"`
@@ -119,7 +120,7 @@ func buildDescribeOutput(client *sshc.Client, rr *resolvedRemote, cfg *config.Co
 	)
 
 	if noDiscovery {
-		p, body, err := fetchManifestOnly(client)
+		p, body, err := discovery.FetchManifest(func(script string) ([]byte, error) { return client.Run("sh", []byte(script)) })
 		if err != nil {
 			return nil, err
 		}
@@ -163,12 +164,18 @@ func buildDescribeOutput(client *sshc.Client, rr *resolvedRemote, cfg *config.Co
 		modeStr = err.Error()
 	}
 
+	reconnect, err := reconnectFor("", cfg, ref)
+	if err != nil {
+		return nil, fmt.Errorf("invalid reconnect_for: %w", err)
+	}
+
 	return &describeOutput{
 		Remote:         rr.Peer.HostName,
 		Addr:           rr.Addr.String(),
 		User:           rr.User,
 		Transport:      string(transportMode("", cfg, ref)),
 		Protocols:      set.String(),
+		ReconnectFor:   reconnect.String(),
 		DNS:            describeDNS{Mode: modeStr, Servers: servers, Domains: domains},
 		ManifestSource: source,
 		Manifest:       m,
@@ -185,6 +192,7 @@ func printDescribe(cmd *cobra.Command, out *describeOutput) error {
 	_, _ = fmt.Fprintf(w, "User:\t%s\n", out.User)
 	_, _ = fmt.Fprintf(w, "Transport:\t%s\n", out.Transport)
 	_, _ = fmt.Fprintf(w, "Protocols:\t%s\n", out.Protocols)
+	_, _ = fmt.Fprintf(w, "Reconnect for:\t%s\n", out.ReconnectFor)
 	_, _ = fmt.Fprintf(w, "DNS mode:\t%s\n", out.DNS.Mode)
 	_, _ = fmt.Fprintf(w, "DNS servers:\t%s\n", joinOrNone(out.DNS.Servers))
 	_, _ = fmt.Fprintf(w, "DNS domains:\t%s\n", joinOrNone(out.DNS.Domains))

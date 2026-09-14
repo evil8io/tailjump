@@ -56,6 +56,13 @@ func newQUICLoopback(t *testing.T, srv *Server) (*Client, *QUICClient, QUICReque
 	return client, q, req, reply
 }
 
+func TestQUICClientProbe(t *testing.T) {
+	_, q, _, _ := newQUICLoopback(t, &Server{})
+	if err := q.Probe(context.Background()); err != nil {
+		t.Fatalf("a second Probe on an established connection: %v", err)
+	}
+}
+
 func TestQUICLoopbackTCP(t *testing.T) {
 	dst := tcpEchoListener(t)
 	_, q, _, _ := newQUICLoopback(t, &Server{})

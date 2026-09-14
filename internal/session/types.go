@@ -12,12 +12,18 @@ type PlanDNS struct {
 
 // Plan is the JSON that tj connect hands to the root session runner.
 type Plan struct {
-	Remote     string   `json:"remote"`
+	Remote string `json:"remote"`
+	// Ref is the reference of the remote after the alias lookup, a hostname
+	// or a tag. The unit resolves it again on a reconnect.
+	Ref        string   `json:"ref"`
 	Addr       string   `json:"addr"`
 	User       string   `json:"user"`
 	Networks   []string `json:"networks"`
 	DNS        PlanDNS  `json:"dns"`
 	HelperArch string   `json:"helper_arch"`
+	// ManifestSHA256 is the hex SHA-256 of the raw manifest bytes that
+	// connect read, the hash of zero bytes when the remote has no manifest.
+	ManifestSHA256 string `json:"manifest_sha256"`
 	// Transport is the mode: auto, quic, or ssh. An empty value means auto.
 	Transport string `json:"transport"`
 	// QUICPorts is the helper's listen range, for example 7443-7452.
@@ -38,6 +44,8 @@ type Plan struct {
 	// Verbose sets the session log level to debug. The unit inherits no flag
 	// and no environment, so tj -v connect puts the value here.
 	Verbose bool `json:"verbose,omitempty"`
+	// ReconnectFor is the reconnect window in seconds, 0 for off.
+	ReconnectFor int `json:"reconnect_for"`
 }
 
 // Session status values in the state file.

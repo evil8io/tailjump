@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -97,6 +98,54 @@ func TestLoadRejectsBadEnumValue(t *testing.T) {
 	_, err := Load(p)
 	if err == nil || !strings.Contains(err.Error(), "defaults.dns") {
 		t.Fatalf("Load error %v, want it to name defaults.dns", err)
+	}
+}
+
+func TestLoadReconnectForValid(t *testing.T) {
+	for _, value := range []string{"10m", "0", "1h30m"} {
+		t.Run(value, func(t *testing.T) {
+			p := filepath.Join(t.TempDir(), "config.yaml")
+			body := fmt.Sprintf("defaults:\n  reconnect_for: %q\nremotes:\n  gw:\n    host: gw.example\n    reconnect_for: %q\n", value, value)
+			if err := writeFile(p, body); err != nil {
+				t.Fatal(err)
+			}
+			c, err := Load(p)
+			if err != nil {
+				t.Fatalf("Load(%q): %v", value, err)
+			}
+			if c.Defaults.ReconnectFor != value {
+				t.Fatalf("defaults.reconnect_for = %q, want %q", c.Defaults.ReconnectFor, value)
+			}
+			if c.Remotes["gw"].ReconnectFor != value {
+				t.Fatalf("remotes.gw.reconnect_for = %q, want %q", c.Remotes["gw"].ReconnectFor, value)
+			}
+		})
+	}
+}
+
+func TestLoadReconnectForInvalid(t *testing.T) {
+	for _, value := range []string{"abc", "-1m"} {
+		t.Run("defaults/"+value, func(t *testing.T) {
+			p := filepath.Join(t.TempDir(), "config.yaml")
+			if err := writeFile(p, fmt.Sprintf("defaults:\n  reconnect_for: %q\n", value)); err != nil {
+				t.Fatal(err)
+			}
+			_, err := Load(p)
+			if err == nil || !strings.Contains(err.Error(), "defaults.reconnect_for") {
+				t.Fatalf("Load(%q) error %v, want it to name defaults.reconnect_for", value, err)
+			}
+		})
+		t.Run("remote/"+value, func(t *testing.T) {
+			p := filepath.Join(t.TempDir(), "config.yaml")
+			body := fmt.Sprintf("remotes:\n  gw:\n    host: gw.example\n    reconnect_for: %q\n", value)
+			if err := writeFile(p, body); err != nil {
+				t.Fatal(err)
+			}
+			_, err := Load(p)
+			if err == nil || !strings.Contains(err.Error(), "remotes.gw.reconnect_for") {
+				t.Fatalf("Load(%q) error %v, want it to name remotes.gw.reconnect_for", value, err)
+			}
+		})
 	}
 }
 

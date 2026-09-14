@@ -2,6 +2,7 @@ package mux
 
 import (
 	"bufio"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -73,6 +74,24 @@ func (c *Client) Info() ControlInfo {
 // keepalive fails. It is the liveness check of the session.
 func (c *Client) Wait() <-chan struct{} {
 	return c.sess.CloseChan()
+}
+
+// Ping sends one yamux ping on the session and returns the error, nil on a
+// completed round trip. Session.Ping blocks up to the yamux connection write
+// timeout, so Ping runs it in a goroutine and returns ctx.Err() when the
+// context ends first.
+func (c *Client) Ping(ctx context.Context) error {
+	ch := make(chan error, 1)
+	go func() {
+		_, err := c.sess.Ping()
+		ch <- err
+	}()
+	select {
+	case err := <-ch:
+		return err
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 // Quit asks the helper to exit. The helper acts on quit at once and tears the

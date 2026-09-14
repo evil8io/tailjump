@@ -74,17 +74,17 @@ func DialQUIC(ctx context.Context, addr netip.AddrPort, cert tls.Certificate, he
 		_ = q.Close()
 		return nil, err
 	}
-	if err := q.probe(ctx); err != nil {
+	if err := q.Probe(ctx); err != nil {
 		_ = q.Close()
 		return nil, fmt.Errorf("quic: probe %s: %w", addr, err)
 	}
 	return q, nil
 }
 
-// probe opens a probe stream and waits for the helper's ok status. TLS 1.3
+// Probe opens a probe stream and waits for the helper's ok status. TLS 1.3
 // lets the client complete the handshake before the helper has verified the
 // client certificate, so the dial counts only when the helper answers.
-func (q *QUICClient) probe(ctx context.Context) error {
+func (q *QUICClient) Probe(ctx context.Context) error {
 	st, err := q.conn.OpenStreamSync(ctx)
 	if err != nil {
 		return err
