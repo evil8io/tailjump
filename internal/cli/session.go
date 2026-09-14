@@ -59,7 +59,10 @@ func newSessionRunCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:    "run <plan>",
 		Hidden: true,
-		Args:   cobra.ExactArgs(1),
+		// systemd stops the unit with SIGTERM, and Run then reverts the
+		// session and returns nil. An exit 130 would mark the unit failed.
+		Annotations: map[string]string{signalExitZero: "true"},
+		Args:        cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return session.Run(cmd.Context(), args[0])
 		},

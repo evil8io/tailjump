@@ -2,14 +2,25 @@
 package cli
 
 import (
+	"context"
 	"errors"
 	"log/slog"
 	"os"
+	"os/signal"
+	"syscall"
 
 	"github.com/spf13/cobra"
 
 	"github.com/evil8io/tailjump/internal/version"
 )
+
+// exitInterrupted is the exit code of a command that a signal stopped. See
+// docs/architecture.md, "CLI conventions".
+const exitInterrupted = 130
+
+// signalExitZero is the annotation of a command that exits 0 after a signal
+// instead of exitInterrupted.
+const signalExitZero = "tj.signal-exit-zero"
 
 // ExitError is an error with an explicit process exit code. main prints its
 // message and exits with Code. See docs/architecture.md, "CLI conventions".
@@ -21,9 +32,31 @@ type ExitError struct {
 func (e *ExitError) Error() string { return e.Err.Error() }
 func (e *ExitError) Unwrap() error { return e.Err }
 
-// Execute runs the tj root command.
+// Execute runs the tj root command with a context that SIGINT and SIGTERM
+// cancel. A command that ends while that context is done exits 130, whatever
+// it returned. An unprivileged process restores the default signal action
+// after the first signal, so a second Ctrl-C ends it at once. The root copy
+// keeps its handler, because it stops the session unit after the cancel and a
+// second signal would leave that unit running.
 func Execute() error {
-	return newRootCmd().Execute()
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	if os.Geteuid() != 0 {
+		go func() {
+			<-ctx.Done()
+			stop()
+		}()
+	}
+
+	cmd, err := newRootCmd().ExecuteContextC(ctx)
+	if ctx.Err() != nil && !exitsZeroOnSignal(cmd) {
+		return &ExitError{Code: exitInterrupted, Err: errors.New("interrupted")}
+	}
+	return err
+}
+
+func exitsZeroOnSignal(cmd *cobra.Command) bool {
+	return cmd != nil && cmd.Annotations[signalExitZero] != ""
 }
 
 func newRootCmd() *cobra.Command {

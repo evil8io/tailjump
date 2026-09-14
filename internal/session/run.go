@@ -29,6 +29,10 @@ const uploadScript = `d="${XDG_RUNTIME_DIR:-$HOME/.cache/tj}"; mkdir -p "$d" && 
 // upTimeout bounds the wait for the session to report status up.
 const upTimeout = 60 * time.Second
 
+// cancelStopTimeout bounds the wait for the unit to stop after a cancelled
+// connect.
+const cancelStopTimeout = 25 * time.Second
+
 // Start writes the plan and starts the session. Without foreground it starts
 // the transient unit and waits for the state file to report up; with
 // foreground it runs the session in-process. Start runs as root.
@@ -44,7 +48,30 @@ func Start(ctx context.Context, planJSON []byte, foreground bool) error {
 	if err := plat.Runner.Start(planPath); err != nil {
 		return err
 	}
-	return waitForUp(ctx, plat)
+	if err := waitForUp(ctx, plat); err != nil {
+		if ctx.Err() != nil {
+			return stopCancelled(ctx, plat)
+		}
+		return err
+	}
+	return nil
+}
+
+// stopCancelled stops the unit of a connect that a signal cancelled, and
+// waits until the unit is inactive. The connect context is done, so the wait
+// gets its own deadline. A session that already came up stays up, because the
+// caller reaches this path on a failed wait only.
+func stopCancelled(ctx context.Context, plat platform.Platform) error {
+	if err := plat.Runner.Stop(); err != nil {
+		slog.Warn("stop the cancelled session", "error", err)
+	}
+	wait, cancel := context.WithTimeout(context.WithoutCancel(ctx), cancelStopTimeout)
+	defer cancel()
+	if err := waitInactive(wait, plat, cancelStopTimeout); err != nil {
+		slog.Warn("wait for the cancelled session to stop", "error", err)
+	}
+	_, _ = fmt.Fprintln(os.Stderr, "connect cancelled; the session is stopped")
+	return ctx.Err()
 }
 
 func waitForUp(ctx context.Context, plat platform.Platform) error {

@@ -19,6 +19,10 @@ import (
 // cannot write.
 const RootCopy = "/usr/local/libexec/tj/tj"
 
+// sudoWaitDelay is the time the root copy gets to stop the session unit after
+// the cancel signal, before Wait kills sudo.
+const sudoWaitDelay = 30 * time.Second
+
 // Connect refuses when a session is active, then starts the session. When the
 // effective uid is 0 it runs the start in-process; otherwise it re-execs
 // through sudo to the root copy. The plan is already computed by the caller.
@@ -132,6 +136,11 @@ func exitStderr(err error) string {
 func runSudo(ctx context.Context, stdin []byte, args ...string) error {
 	full := append([]string{"-n", RootCopy}, args...)
 	cmd := exec.CommandContext(ctx, "sudo", full...)
+	// SIGINT instead of the default kill: sudo relays the signal to the root
+	// copy, which stops the session unit before it exits. A kill of sudo
+	// leaves the unit running, because sudo cannot relay a SIGKILL.
+	cmd.Cancel = func() error { return cmd.Process.Signal(os.Interrupt) }
+	cmd.WaitDelay = sudoWaitDelay
 	if stdin != nil {
 		cmd.Stdin = bytes.NewReader(stdin)
 	}
