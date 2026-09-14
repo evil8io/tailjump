@@ -320,6 +320,21 @@ The SSH user defaults to the local username. The precedence is the flag, then `r
 
 A remote's `networks` and `exclude` feed the session network computation: `networks` add to the routed set alongside the manifest, discovery, and the `--network` flags, and `exclude` drops from it alongside `config.exclude`, the manifest exclude, and the `--exclude` flags. See "Session networks". `tj config` writes the defaults and the global exclude; `tj alias` writes the aliases.
 
+`tj config set exclude <cidr>[,<cidr>...]` replaces the global exclude list. `tj config unset <key>` clears one key: `defaults.user`, `defaults.dns`, `defaults.transport`, `defaults.protocols`, or `exclude`. An unknown key is a usage error, exit code 2, and the message lists the valid keys.
+
+`tj alias unset <alias> <field>...` clears one or more fields of an alias: `user`, `dns`, `transport`, `protocols`, `networks`, or `exclude`. An alias needs `host`, so `unset` does not clear it. An unknown field, or `host`, is a usage error, exit code 2, and the message lists the valid fields. The `--network` and `--exclude` flags of `tj alias set` replace the whole list. They do not add to it.
+
+`config.Load` decodes the file with unknown fields rejected. It then validates the file:
+
+* `version` is absent or 1.
+* Each DNS, transport, and protocols value, in `defaults` and in every remote, is valid or empty.
+* Each CIDR in `exclude`, in every remote's `networks`, and in every remote's `exclude`, parses.
+* Every remote has a `host`.
+
+The error names the file path and the key, for example `remotes.gw.dns: invalid value "bogus", want none, split, or all`. Every command that loads the config reports a broken file at once, exit code 1, except `tj list`, which turns the error into a warning and continues (S2).
+
+A CLI write of `tj config` or `tj alias` replaces the whole file, so it drops the comments of a file an engineer edited by hand. Edit the file directly to keep the comments. Run `$EDITOR $(tj config path)` to open it. The next command that loads the file validates it.
+
 ### CLI conventions
 
 * Human output through `text/tabwriter`. `--json` on `list`, `describe`, `status`, `doctor`, and `connect --dry-run`.

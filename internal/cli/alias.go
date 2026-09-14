@@ -13,12 +13,17 @@ import (
 	"github.com/evil8io/tailjump/internal/manifest"
 )
 
+// aliasFields are the fields tj alias unset accepts. host is not among
+// them, because an alias needs it.
+var aliasFields = []string{"user", "dns", "transport", "protocols", "networks", "exclude"}
+
 // newAliasCmd is the tj alias command group. It manages the config aliases
 // under remotes. It is a separate command from the hidden _remote helper.
 func newAliasCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:        "alias",
 		Short:      "Manage the config aliases for remotes",
+		Long:       "Manage the config aliases for remotes.\n\n" + configLong,
 		Args:       cobra.NoArgs,
 		SuggestFor: []string{"remote"},
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -30,6 +35,7 @@ func newAliasCmd() *cobra.Command {
 		newAliasShowCmd(),
 		newAliasAddCmd(),
 		newAliasSetCmd(),
+		newAliasUnsetCmd(),
 		newAliasRmCmd(),
 	)
 	return cmd
@@ -173,6 +179,50 @@ func newAliasSetCmd() *cobra.Command {
 	return cmd
 }
 
+func newAliasUnsetCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "unset <alias> <field>...",
+		Short: "Clear one or more fields of a config alias",
+		Args:  cobra.MinimumNArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			alias, fields := args[0], args[1:]
+			path := localConfigPath()
+			cfg, err := config.Load(path)
+			if err != nil {
+				return fmt.Errorf("load config: %w", err)
+			}
+			rc, ok := cfg.Remotes[alias]
+			if !ok {
+				return fmt.Errorf("remote %q is not in the config", alias)
+			}
+			for _, field := range fields {
+				switch field {
+				case "user":
+					rc.User = ""
+				case "dns":
+					rc.DNS = ""
+				case "transport":
+					rc.Transport = ""
+				case "protocols":
+					rc.Protocols = ""
+				case "networks":
+					rc.Networks = nil
+				case "exclude":
+					rc.Exclude = nil
+				default:
+					return &ExitError{Code: 2, Err: fmt.Errorf("unknown field %q; want %s", field, strings.Join(aliasFields, ", "))}
+				}
+			}
+			cfg.Remotes[alias] = rc
+			if err := saveLocalConfig(path, cfg); err != nil {
+				return fmt.Errorf("save config: %w", err)
+			}
+			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "updated remote %q\n", alias)
+			return nil
+		},
+	}
+}
+
 func newAliasRmCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:     "remove <alias>",
@@ -205,8 +255,8 @@ func addRemoteFlags(cmd *cobra.Command) {
 	cmd.Flags().Var(&dnsModeValue{}, "dns", "the DNS mode")
 	cmd.Flags().Var(&transportModeValue{}, "transport", "the data plane transport")
 	cmd.Flags().Var(&protocolSetValue{}, "protocols", "the protocols to forward")
-	cmd.Flags().StringArray("network", nil, "a CIDR to route for this remote, repeatable")
-	cmd.Flags().StringArray("exclude", nil, "a CIDR to exclude for this remote, repeatable")
+	cmd.Flags().StringArray("network", nil, "a CIDR to route for this remote, repeatable; replaces the whole list")
+	cmd.Flags().StringArray("exclude", nil, "a CIDR to exclude for this remote, repeatable; replaces the whole list")
 }
 
 // remoteFromFlags returns base with the fields whose flags were set on cmd

@@ -3,6 +3,7 @@ package config
 import (
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -63,5 +64,59 @@ func TestSaveRoundTrip(t *testing.T) {
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("round trip: got %+v, want %+v", got, want)
+	}
+}
+
+func TestLoadRejectsUnknownKey(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "config.yaml")
+	if err := writeFile(p, "unknownkey: {}\n"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(p); err == nil {
+		t.Fatal("Load: want an error for an unknown key")
+	} else if !strings.Contains(err.Error(), p) {
+		t.Fatalf("Load error %q, want it to name the path %q", err, p)
+	}
+}
+
+func TestLoadRejectsWrongVersion(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "config.yaml")
+	if err := writeFile(p, "version: 2\n"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(p); err == nil {
+		t.Fatal("Load: want an error for an unsupported version")
+	}
+}
+
+func TestLoadRejectsBadEnumValue(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "config.yaml")
+	if err := writeFile(p, "defaults:\n  dns: bogus\n"); err != nil {
+		t.Fatal(err)
+	}
+	_, err := Load(p)
+	if err == nil || !strings.Contains(err.Error(), "defaults.dns") {
+		t.Fatalf("Load error %v, want it to name defaults.dns", err)
+	}
+}
+
+func TestLoadRejectsBadCIDR(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "config.yaml")
+	if err := writeFile(p, "exclude:\n  - bogus\n"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(p); err == nil {
+		t.Fatal("Load: want an error for an invalid CIDR")
+	}
+}
+
+func TestLoadRejectsRemoteWithoutHost(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "config.yaml")
+	if err := writeFile(p, "remotes:\n  gw:\n    user: root\n"); err != nil {
+		t.Fatal(err)
+	}
+	_, err := Load(p)
+	if err == nil || !strings.Contains(err.Error(), "remotes.gw") {
+		t.Fatalf("Load error %v, want it to name remotes.gw", err)
 	}
 }
