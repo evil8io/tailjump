@@ -7,19 +7,21 @@ import (
 	"os/user"
 
 	"github.com/spf13/cobra"
+
+	"github.com/evil8io/tailjump/internal/session"
 )
 
 const (
-	rootCopyDir  = "/usr/local/libexec/tj"
-	rootCopyPath = "/usr/local/libexec/tj/tj"
-	sudoersPath  = "/etc/sudoers.d/tj"
-	tunPath      = "/dev/net/tun"
+	rootCopyDir = "/usr/local/libexec/tj"
+	sudoersPath = "/etc/sudoers.d/tj"
+	tunPath     = "/dev/net/tun"
 )
 
 func newSetupCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "setup",
 		Short: "Write the sudoers rule and check the required tools",
+		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return runSetup(cmd)
 		},
@@ -41,7 +43,7 @@ func runSetup(cmd *cobra.Command) error {
 		return fmt.Errorf("current user: %w", err)
 	}
 
-	_, _ = fmt.Fprintf(out, "installing the root copy at %s and the sudoers rule at %s\n", rootCopyPath, sudoersPath)
+	_, _ = fmt.Fprintf(out, "installing the root copy at %s and the sudoers rule at %s\n", session.RootCopy, sudoersPath)
 	_, _ = fmt.Fprintln(out, "sudo runs once and may prompt for your password")
 
 	if err := installRoot(self, u.Username); err != nil {
@@ -78,7 +80,7 @@ func checkTools(cmd *cobra.Command) error {
 // shell, validated with visudo. It removes the sudoers file when visudo
 // rejects it, so a syntax error never leaves a broken rule.
 func installRoot(self, username string) error {
-	rule := fmt.Sprintf("%s ALL=(root) NOPASSWD: %s", username, rootCopyPath)
+	rule := fmt.Sprintf("%s ALL=(root) NOPASSWD: %s", username, session.RootCopy)
 	script := fmt.Sprintf(`set -e
 install -d -m 0755 -o root -g root %q
 install -m 0755 -o root -g root %q %q
@@ -86,7 +88,7 @@ umask 077
 printf '%%s\n' %q > %q
 chmod 0440 %q
 if ! visudo -cf %q; then rm -f %q; echo "sudoers validation failed" >&2; exit 1; fi
-`, rootCopyDir, self, rootCopyPath, rule, sudoersPath, sudoersPath, sudoersPath, sudoersPath)
+`, rootCopyDir, self, session.RootCopy, rule, sudoersPath, sudoersPath, sudoersPath, sudoersPath)
 
 	cmd := exec.Command("sudo", "sh", "-c", script)
 	cmd.Stdin = os.Stdin

@@ -17,8 +17,10 @@ func newSessionCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:    "_session",
 		Hidden: true,
-		// Bare _session is not an operation; it needs a subcommand.
-		RunE: runNotImplemented,
+		Args:   cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			return cmd.Help()
+		},
 	}
 	cmd.AddCommand(
 		newSessionStartCmd(),

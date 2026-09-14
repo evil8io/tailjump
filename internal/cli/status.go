@@ -17,6 +17,7 @@ func newStatusCmd() *cobra.Command {
 		Use:     "status",
 		Aliases: []string{"st"},
 		Short:   "Print the active session, its transport, its path, its protocols, its networks, the DNS mode, and the uptime",
+		Args:    cobra.NoArgs,
 		RunE:    runStatus,
 	}
 	cmd.Flags().Bool("json", false, "print JSON output")

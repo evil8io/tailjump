@@ -41,6 +41,7 @@ func newListCmd() *cobra.Command {
 		Use:     "list",
 		Aliases: []string{"ls"},
 		Short:   "List the online tailnet peers",
+		Args:    cobra.NoArgs,
 		RunE:    runList,
 	}
 	cmd.Flags().String("tag", "", "list only peers with this tag")

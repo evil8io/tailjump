@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/netip"
+	"strings"
 	"text/tabwriter"
 
 	"github.com/spf13/cobra"
@@ -63,14 +64,14 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 	rr, err := resolveRemote(ctx, newTailnetClient(), cfg, args[0], flagUser)
 	addErr("peer online", err)
 	if err != nil {
-		return printDoctor(cmd, checks, asJSON)
+		return finishDoctor(cmd, checks, asJSON)
 	}
 	add("peer", fmt.Sprintf("%s (%s)", rr.Peer.HostName, rr.Addr))
 
 	client, err := dialRemote(ctx, rr.Addr, rr.Peer.HostName, rr.User)
 	addErr("ssh ok", err)
 	if err != nil {
-		return printDoctor(cmd, checks, asJSON)
+		return finishDoctor(cmd, checks, asJSON)
 	}
 	defer func() { _ = client.Close() }()
 	add("banner", "printed to stderr, if the remote sent one")
@@ -78,7 +79,7 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 	res, err := runDiscovery(client)
 	addErr("discovery ok", err)
 	if err != nil {
-		return printDoctor(cmd, checks, asJSON)
+		return finishDoctor(cmd, checks, asJSON)
 	}
 	add("manifest", valueOrAbsent(res.ManifestPath))
 	add("exec dir", valueOrAbsent(res.ExecDir))
@@ -86,7 +87,7 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 	m, err := decodeDoctorManifest(res)
 	addErr("parse manifest", err)
 	if err != nil {
-		return printDoctor(cmd, checks, asJSON)
+		return finishDoctor(cmd, checks, asJSON)
 	}
 
 	networks, err := doctorSessionNetworks(m, res, cfg, rr)
@@ -125,7 +126,7 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	return printDoctor(cmd, checks, asJSON)
+	return finishDoctor(cmd, checks, asJSON)
 }
 
 // doctorProbe brings the QUIC transport up through a temporary helper and
@@ -223,4 +224,30 @@ func printDoctor(cmd *cobra.Command, checks []doctorCheck, asJSON bool) error {
 		_, _ = fmt.Fprintf(w, "%s:\t%s\n", c.Name, c.Value)
 	}
 	return w.Flush()
+}
+
+// finishDoctor prints the report, then fails the command when one or more
+// checks failed, so a script that runs tj doctor sees a non-zero exit.
+func finishDoctor(cmd *cobra.Command, checks []doctorCheck, asJSON bool) error {
+	if err := printDoctor(cmd, checks, asJSON); err != nil {
+		return err
+	}
+	return doctorResult(checks)
+}
+
+func doctorResult(checks []doctorCheck) error {
+	n := 0
+	for _, c := range checks {
+		if strings.HasPrefix(c.Value, "fail:") {
+			n++
+		}
+	}
+	if n == 0 {
+		return nil
+	}
+	plural := "s"
+	if n == 1 {
+		plural = ""
+	}
+	return &ExitError{Code: 1, Err: fmt.Errorf("%d check%s failed", n, plural)}
 }

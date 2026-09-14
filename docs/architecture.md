@@ -307,7 +307,15 @@ A remote's `networks` and `exclude` feed the session network computation: `netwo
 ### CLI conventions
 
 * Human output through `text/tabwriter`. `--json` on `list`, `describe`, `status`, and `doctor`.
-* Errors are one line on stderr with exit code 1. A usage error exits 2. `connect` exits 3 when a session is active.
+* Errors are one line on stderr, `Error: <message>`. The exit code:
+
+| Code | Meaning |
+| ---- | ------- |
+| 0 | Success. `tj status` with no active session also exits 0. `tj connect` to the remote of the active session, without `--replace`, also exits 0 (S9). |
+| 1 | Runtime error: an error that the `RunE` of a command returns. `tj doctor` exits 1 when a check fails. |
+| 2 | Usage error: an unknown command, a wrong number of arguments, an unknown flag, or an invalid flag value. |
+| 3 | `tj connect` finds an active session to a different remote and has no `--replace`. |
+| 130 | SIGINT stopped the command. |
 * `log/slog` with a text handler on stderr. `-v` enables debug. The session unit logs to the journal through stderr.
 * `_remote` and `_session` are hidden commands.
 * `tj doctor <remote>` reports: peer online, SSH ok, banner, manifest path or absent, exec dir, helper architecture, discovery ok, session networks non-empty, DNS mode availability, resolved available, sudo rule present, root copy version, the QUIC transport, and the echo socket of the remote: `raw socket`, `ping socket`, or `none`, with the `ping_group_range` value for the last two. It runs the manifest checks from the remote through the helper over a temporary mux, and from the client with a direct dial.

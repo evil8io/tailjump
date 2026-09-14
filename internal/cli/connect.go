@@ -93,8 +93,7 @@ func runConnect(cmd *cobra.Command, args []string) error {
 	err = session.Connect(ctx, plan, replace, false)
 	var ae *session.ActiveError
 	if errors.As(err, &ae) {
-		fmt.Fprintln(os.Stderr, "Error:", ae)
-		os.Exit(exitActiveSession)
+		return &ExitError{Code: exitActiveSession, Err: ae}
 	}
 	return err
 }

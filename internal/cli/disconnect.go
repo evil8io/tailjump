@@ -11,6 +11,7 @@ func newDisconnectCmd() *cobra.Command {
 		Use:     "disconnect",
 		Aliases: []string{"down"},
 		Short:   "End the active session",
+		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return session.Disconnect(cmd.Context())
 		},

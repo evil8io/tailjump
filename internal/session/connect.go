@@ -3,6 +3,7 @@ package session
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -13,10 +14,10 @@ import (
 	"github.com/evil8io/tailjump/internal/version"
 )
 
-// rootCopy is the root-owned binary that tj setup installs. connect re-execs
+// RootCopy is the root-owned binary that tj setup installs. connect re-execs
 // through sudo to it, so the NOPASSWD sudoers rule points at a file the user
 // cannot write.
-const rootCopy = "/usr/local/libexec/tj/tj"
+const RootCopy = "/usr/local/libexec/tj/tj"
 
 // Connect refuses when a session is active, then starts the session. When the
 // effective uid is 0 it runs the start in-process; otherwise it re-execs
@@ -88,7 +89,7 @@ func waitInactive(ctx context.Context, plat platform.Platform, timeout time.Dura
 // It first checks that the root copy version matches, so a stale copy fails
 // with a clear message instead of a subtle mismatch.
 func sudoStart(ctx context.Context, planJSON []byte, foreground bool) error {
-	if err := checkRootCopy(ctx); err != nil {
+	if err := CheckRootCopy(ctx); err != nil {
 		return err
 	}
 	args := []string{"_session", "start"}
@@ -98,13 +99,16 @@ func sudoStart(ctx context.Context, planJSON []byte, foreground bool) error {
 	return runSudo(ctx, planJSON, args...)
 }
 
-func checkRootCopy(ctx context.Context) error {
-	if _, err := os.Stat(rootCopy); err != nil {
-		return fmt.Errorf("the root copy %s is missing; run tj setup", rootCopy)
+// CheckRootCopy runs the root copy's version command through sudo -n, so one
+// call checks that the file exists, that its version matches this binary,
+// and that the sudo rule is in place. sudo -n never prompts.
+func CheckRootCopy(ctx context.Context) error {
+	if _, err := os.Stat(RootCopy); err != nil {
+		return fmt.Errorf("the root copy %s is missing; run tj setup", RootCopy)
 	}
-	out, err := exec.CommandContext(ctx, rootCopy, "version").Output()
+	out, err := exec.CommandContext(ctx, "sudo", "-n", RootCopy, "version").Output()
 	if err != nil {
-		return fmt.Errorf("run %s version: %w", rootCopy, err)
+		return fmt.Errorf("sudo -n %s version failed: %s; run tj setup", RootCopy, exitStderr(err))
 	}
 	got := strings.TrimSpace(string(out))
 	if got != version.Version {
@@ -113,10 +117,20 @@ func checkRootCopy(ctx context.Context) error {
 	return nil
 }
 
+// exitStderr returns the trimmed stderr of an exec.ExitError, or err's own
+// message when err carries none, for example when sudo itself is missing.
+func exitStderr(err error) string {
+	var ee *exec.ExitError
+	if errors.As(err, &ee) && len(ee.Stderr) > 0 {
+		return strings.TrimSpace(string(ee.Stderr))
+	}
+	return err.Error()
+}
+
 // runSudo runs the root copy under sudo -n with the given arguments. A nil
 // stdin leaves stdin empty; a non-nil stdin feeds the bytes, for the plan.
 func runSudo(ctx context.Context, stdin []byte, args ...string) error {
-	full := append([]string{"-n", rootCopy}, args...)
+	full := append([]string{"-n", RootCopy}, args...)
 	cmd := exec.CommandContext(ctx, "sudo", full...)
 	if stdin != nil {
 		cmd.Stdin = bytes.NewReader(stdin)
