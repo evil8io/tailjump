@@ -9,13 +9,13 @@ import (
 // command keeps its alias.
 func TestAliases(t *testing.T) {
 	cases := map[string]string{
-		"ls":        "list",
-		"up":        "connect",
-		"down":      "disconnect",
-		"st":        "status",
-		"desc":      "describe",
-		"remote ls": "list",
-		"remote rm": "remove",
+		"ls":       "list",
+		"up":       "connect",
+		"down":     "disconnect",
+		"st":       "status",
+		"desc":     "describe",
+		"alias ls": "list",
+		"alias rm": "remove",
 	}
 	for alias, want := range cases {
 		cmd, _, err := newRootCmd().Find(splitArgs(alias))

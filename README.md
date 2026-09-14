@@ -63,7 +63,7 @@ tj status
 tj disconnect
 ```
 
-`<remote>` is a hostname, a tag, or an alias from `tj remote`. `tj --help`
+`<remote>` is a hostname, a tag, or an alias from `tj alias`. `tj --help`
 lists every command and alias.
 
 ## Docs

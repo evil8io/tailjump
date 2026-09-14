@@ -28,7 +28,7 @@ func TestConnectNetworkAndExcludeFlags(t *testing.T) {
 // TestConnectProtocolsFlag locks in the --protocols flag on connect and on
 // the remote alias commands.
 func TestConnectProtocolsFlag(t *testing.T) {
-	for _, cmd := range []*cobra.Command{newConnectCmd(), newRemoteAddCmd(), newRemoteSetCmd()} {
+	for _, cmd := range []*cobra.Command{newConnectCmd(), newAliasAddCmd(), newAliasSetCmd()} {
 		if cmd.Flags().Lookup("protocols") == nil {
 			t.Fatalf("%s is missing --protocols", cmd.Name())
 		}

@@ -52,7 +52,7 @@ func newRootCmd() *cobra.Command {
 		newConnectCmd(),
 		newDisconnectCmd(),
 		newStatusCmd(),
-		newRemoteConfigCmd(),
+		newAliasCmd(),
 		newConfigCmd(),
 		newRemoteCmd(),
 		newSessionCmd(),

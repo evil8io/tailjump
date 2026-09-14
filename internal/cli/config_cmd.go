@@ -15,7 +15,7 @@ import (
 
 // newConfigCmd is the tj config command group. It reads and writes the
 // defaults and the global exclude list, not the per-remote aliases; those
-// belong to tj remote.
+// belong to tj alias.
 func newConfigCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "config",

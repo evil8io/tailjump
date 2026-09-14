@@ -54,6 +54,7 @@ func newListCmd() *cobra.Command {
 
 type listEntry struct {
 	HostName string    `json:"hostname"`
+	Aliases  []string  `json:"aliases,omitempty"`
 	Tags     []string  `json:"tags,omitempty"`
 	Address  string    `json:"address,omitempty"`
 	Session  string    `json:"session,omitempty"`
@@ -109,6 +110,25 @@ func sessionOf(st *session.State, address string) string {
 	return ""
 }
 
+// aliasesByHost resolves every config alias to the online peer that
+// tj connect <alias> would select, keyed by the peer's HostName. An alias
+// whose host matches no online peer is dropped.
+func aliasesByHost(peers []tailnet.Peer, cfg *config.Config) map[string][]string {
+	aliases := map[string][]string{}
+	for _, alias := range sortedRemoteAliases(cfg) {
+		host := cfg.Remotes[alias].Host
+		if host == "" {
+			continue
+		}
+		peer, err := tailnet.Resolve(peers, host)
+		if err != nil {
+			continue
+		}
+		aliases[peer.HostName] = append(aliases[peer.HostName], alias)
+	}
+	return aliases
+}
+
 func orDash(s string) string {
 	if s == "" {
 		return "-"
@@ -137,13 +157,12 @@ func runList(cmd *cobra.Command, _ []string) error {
 		slog.Warn("read session state", "error", err)
 	}
 
-	var cfg *config.Config
-	if probe {
-		cfg, err = loadLocalConfig()
-		if err != nil {
-			return fmt.Errorf("load config: %w", err)
-		}
+	cfg, err := loadLocalConfig()
+	if err != nil {
+		slog.Warn("load config", "error", err)
+		cfg = &config.Config{}
 	}
+	aliases := aliasesByHost(st.Peers, cfg)
 
 	var entries []listEntry
 	for _, p := range st.Peers {
@@ -154,6 +173,7 @@ func runList(cmd *cobra.Command, _ []string) error {
 			continue
 		}
 		entry := buildListEntry(ctx, p, probe, cfg, flagUser)
+		entry.Aliases = aliases[p.HostName]
 		entry.Session = sessionOf(active, entry.Address)
 		entry.Path = pathOf(p)
 		entries = append(entries, entry)
@@ -264,18 +284,19 @@ func pingPath(ctx context.Context, tc *tailnet.Client, addr netip.Addr) *pathInf
 func printListTable(cmd *cobra.Command, entries []listEntry, probe bool) error {
 	w := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 4, 2, ' ', 0)
 	if probe {
-		_, _ = fmt.Fprintln(w, "HOSTNAME\tTAGS\tADDRESS\tSESSION\tPATH\tMANIFEST")
+		_, _ = fmt.Fprintln(w, "HOSTNAME\tALIAS\tTAGS\tADDRESS\tSESSION\tPATH\tMANIFEST")
 	} else {
-		_, _ = fmt.Fprintln(w, "HOSTNAME\tTAGS\tADDRESS\tSESSION\tPATH")
+		_, _ = fmt.Fprintln(w, "HOSTNAME\tALIAS\tTAGS\tADDRESS\tSESSION\tPATH")
 	}
 	for _, e := range entries {
+		alias := joinOrDash(e.Aliases)
 		tags := strings.Join(e.Tags, ",")
 		addr := e.Address
 		if addr == "" {
 			addr = "error: " + e.Error
 		}
 		if !probe {
-			_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", e.HostName, tags, addr, orDash(e.Session), e.Path)
+			_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n", e.HostName, alias, tags, addr, orDash(e.Session), e.Path)
 			continue
 		}
 		manifest := "-"
@@ -287,7 +308,7 @@ func printListTable(cmd *cobra.Command, entries []listEntry, probe bool) error {
 		case e.Manifest != nil:
 			manifest = "no"
 		}
-		_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n", e.HostName, tags, addr, orDash(e.Session), e.Path, manifest)
+		_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n", e.HostName, alias, tags, addr, orDash(e.Session), e.Path, manifest)
 	}
 	return w.Flush()
 }

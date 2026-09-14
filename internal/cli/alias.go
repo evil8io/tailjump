@@ -16,25 +16,29 @@ import (
 	"github.com/evil8io/tailjump/internal/transport"
 )
 
-// newRemoteConfigCmd is the tj remote command group. It manages the config
-// aliases under remotes. It is a separate command from the hidden _remote
-// helper.
-func newRemoteConfigCmd() *cobra.Command {
+// newAliasCmd is the tj alias command group. It manages the config aliases
+// under remotes. It is a separate command from the hidden _remote helper.
+func newAliasCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "remote",
-		Short: "Manage the config aliases for remotes",
+		Use:        "alias",
+		Short:      "Manage the config aliases for remotes",
+		Args:       cobra.NoArgs,
+		SuggestFor: []string{"remote"},
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			return cmd.Help()
+		},
 	}
 	cmd.AddCommand(
-		newRemoteListCmd(),
-		newRemoteShowCmd(),
-		newRemoteAddCmd(),
-		newRemoteSetCmd(),
-		newRemoteRmCmd(),
+		newAliasListCmd(),
+		newAliasShowCmd(),
+		newAliasAddCmd(),
+		newAliasSetCmd(),
+		newAliasRmCmd(),
 	)
 	return cmd
 }
 
-func newRemoteListCmd() *cobra.Command {
+func newAliasListCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "list",
 		Aliases: []string{"ls"},
@@ -71,7 +75,7 @@ func newRemoteListCmd() *cobra.Command {
 	return cmd
 }
 
-func newRemoteShowCmd() *cobra.Command {
+func newAliasShowCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "show <alias>",
 		Short: "Show one config alias",
@@ -105,7 +109,7 @@ func newRemoteShowCmd() *cobra.Command {
 	return cmd
 }
 
-func newRemoteAddCmd() *cobra.Command {
+func newAliasAddCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "add <alias>",
 		Short: "Add a config alias",
@@ -118,7 +122,7 @@ func newRemoteAddCmd() *cobra.Command {
 				return fmt.Errorf("load config: %w", err)
 			}
 			if _, ok := cfg.Remotes[alias]; ok {
-				return fmt.Errorf("remote %q already exists; use tj remote set to change it", alias)
+				return fmt.Errorf("remote %q already exists; use tj alias set to change it", alias)
 			}
 			rc, err := remoteFromFlags(cmd, config.RemoteConfig{})
 			if err != nil {
@@ -140,7 +144,7 @@ func newRemoteAddCmd() *cobra.Command {
 	return cmd
 }
 
-func newRemoteSetCmd() *cobra.Command {
+func newAliasSetCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "set <alias>",
 		Short: "Update an existing config alias",
@@ -172,7 +176,7 @@ func newRemoteSetCmd() *cobra.Command {
 	return cmd
 }
 
-func newRemoteRmCmd() *cobra.Command {
+func newAliasRmCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:     "remove <alias>",
 		Aliases: []string{"rm"},
