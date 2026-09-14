@@ -336,6 +336,7 @@ A remote's `networks` and `exclude` feed the session network computation: `netwo
 * `tj doctor <remote>` reports: peer online, SSH ok, banner, manifest path or absent, exec dir, helper architecture, discovery ok, session networks non-empty, DNS mode availability, resolved available, sudo rule present, root copy version, the QUIC transport, and the echo socket of the remote: `raw socket`, `ping socket`, or `none`, with the `ping_group_range` value for the last two. It runs the manifest checks from the remote through the helper over a temporary mux, and from the client with a direct dial.
 * Timeouts: SSH dial 15 s, discovery exec 20 s, helper handshake 10 s, connect 90 s in total.
 * `tj list --path` sends up to 3 disco pings per remote through the local API, 200 ms apart, within 2 s, and stops at the first direct pong. A ping can time out while the remote moves data at the link rate: spike 9 measured 4 timeouts of 3 s during downloads at 550 Mbit/s with the session fine at the same moments. The flap detector of the session reads the status endpoint every 10 s and sends no ping, so it is unaffected.
+* `tj list --probe` opens SSH to at most 8 peers at a time, and prints them in the tailnet status order regardless of which probe finishes first. It caches no probe result: each run opens SSH again.
 
 ## Testing
 

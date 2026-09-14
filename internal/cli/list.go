@@ -20,6 +20,9 @@ import (
 
 const (
 	probeTimeout = 5 * time.Second
+	// probeConcurrency bounds how many peers tj list --probe probes at
+	// once, so a large tailnet opens only that many SSH connections.
+	probeConcurrency = 8
 
 	// The --path pings: the first pong to a peer with a direct path can
 	// arrive over DERP, so the ping repeats until a direct pong or the
@@ -165,6 +168,7 @@ func runList(cmd *cobra.Command, _ []string) error {
 	aliases := aliasesByHost(st.Peers, cfg)
 
 	var entries []listEntry
+	var peers []tailnet.Peer
 	for _, p := range st.Peers {
 		if !p.Online {
 			continue
@@ -172,11 +176,15 @@ func runList(cmd *cobra.Command, _ []string) error {
 		if tag != "" && !tailnet.HasTag(p.Tags, tag) {
 			continue
 		}
-		entry := buildListEntry(ctx, p, probe, cfg, flagUser)
+		entry := buildListEntry(p)
 		entry.Aliases = aliases[p.HostName]
 		entry.Session = sessionOf(active, entry.Address)
 		entry.Path = pathOf(p)
 		entries = append(entries, entry)
+		peers = append(peers, p)
+	}
+	if probe {
+		probeEntries(ctx, peers, entries, cfg, flagUser)
 	}
 	if pingIdle {
 		pingIdlePaths(ctx, tc, entries)
@@ -188,7 +196,7 @@ func runList(cmd *cobra.Command, _ []string) error {
 	return printListTable(cmd, entries, probe)
 }
 
-func buildListEntry(ctx context.Context, p tailnet.Peer, probe bool, cfg *config.Config, flagUser string) listEntry {
+func buildListEntry(p tailnet.Peer) listEntry {
 	entry := listEntry{HostName: p.HostName, Tags: p.Tags}
 
 	addr, err := p.IPv4()
@@ -197,16 +205,43 @@ func buildListEntry(ctx context.Context, p tailnet.Peer, probe bool, cfg *config
 		return entry
 	}
 	entry.Address = addr.String()
-
-	if probe {
-		has, perr := probeManifest(ctx, p, addr, cfg, flagUser)
-		if perr != nil {
-			entry.Error = perr.Error()
-		} else {
-			entry.Manifest = &has
-		}
-	}
 	return entry
+}
+
+// probePeer probes one peer for a manifest. A test replaces it so
+// probeEntries can run its parallel path without SSH.
+var probePeer = probeManifest
+
+// probeEntries probes every entry that has an address, at most
+// probeConcurrency at a time, and writes each result to its own entry. This
+// keeps the output in the order of entries, the tailnet status order.
+func probeEntries(ctx context.Context, peers []tailnet.Peer, entries []listEntry, cfg *config.Config, flagUser string) {
+	sem := make(chan struct{}, probeConcurrency)
+	var wg sync.WaitGroup
+	for i := range entries {
+		e := &entries[i]
+		if e.Address == "" {
+			continue
+		}
+		p := peers[i]
+		addr, err := p.IPv4()
+		if err != nil {
+			continue
+		}
+		wg.Add(1)
+		sem <- struct{}{}
+		go func() {
+			defer wg.Done()
+			defer func() { <-sem }()
+			has, perr := probePeer(ctx, p, addr, cfg, flagUser)
+			if perr != nil {
+				e.Error = perr.Error()
+			} else {
+				e.Manifest = &has
+			}
+		}()
+	}
+	wg.Wait()
 }
 
 // probeManifest opens a short-lived SSH connection to the peer and runs
