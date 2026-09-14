@@ -35,6 +35,9 @@ type Plan struct {
 	// SingleLane keeps the SSH transport on the primary lane alone. It is a
 	// measurement knob; connect sets it from TJ_SSH_LANES.
 	SingleLane bool `json:"single_lane,omitempty"`
+	// Verbose sets the session log level to debug. The unit inherits no flag
+	// and no environment, so tj -v connect puts the value here.
+	Verbose bool `json:"verbose,omitempty"`
 }
 
 // Session status values in the state file.

@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 	"text/tabwriter"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -46,7 +47,9 @@ func newConnectCmd() *cobra.Command {
 }
 
 func runConnect(cmd *cobra.Command, args []string) error {
+	start := time.Now()
 	flagUser, _ := cmd.Flags().GetString("user")
+	verbose, _ := cmd.Flags().GetBool("verbose")
 	dnsFlag := flagString(cmd, "dns")
 	transportFlag := flagString(cmd, "transport")
 	protocolsFlag := flagString(cmd, "protocols")
@@ -69,6 +72,9 @@ func runConnect(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
+	if !dryRun {
+		_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "connecting to %s (%s) as %s\n", rr.Peer.HostName, rr.Addr, rr.User)
+	}
 
 	client, err := dialRemote(ctx, rr.Addr, rr.Peer.HostName, rr.User)
 	if err != nil {
@@ -82,6 +88,7 @@ func runConnect(cmd *cobra.Command, args []string) error {
 		protocols: protocolsFlag,
 		networks:  networkFlags,
 		excludes:  excludeFlags,
+		verbose:   verbose,
 	}, noDiscovery)
 	if err != nil {
 		return err
@@ -91,7 +98,7 @@ func runConnect(cmd *cobra.Command, args []string) error {
 		return printPlan(cmd, plan, asJSON)
 	}
 
-	err = session.Connect(ctx, plan, replace, false)
+	err = session.Connect(ctx, cmd.OutOrStdout(), cmd.ErrOrStderr(), plan, replace, false, start)
 	var ae *session.ActiveError
 	if errors.As(err, &ae) {
 		return &ExitError{Code: exitActiveSession, Err: ae}
@@ -136,6 +143,7 @@ type planFlags struct {
 	protocols string
 	networks  []string
 	excludes  []string
+	verbose   bool
 }
 
 // buildPlan runs discovery, computes the session networks, resolves the DNS
@@ -218,6 +226,7 @@ func buildPlan(client *sshc.Client, rr *resolvedRemote, cfg *config.Config, ref 
 		Controller:    controller,
 		Protocols:     set.String(),
 		SingleLane:    singleLane,
+		Verbose:       flags.verbose,
 	}, nil
 }
 

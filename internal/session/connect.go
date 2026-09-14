@@ -5,6 +5,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
+	"log/slog"
 	"os"
 	"os/exec"
 	"strings"
@@ -23,10 +25,20 @@ const RootCopy = "/usr/local/libexec/tj/tj"
 // the cancel signal, before Wait kills sudo.
 const sudoWaitDelay = 30 * time.Second
 
-// Connect refuses when a session is active, then starts the session. When the
-// effective uid is 0 it runs the start in-process; otherwise it re-execs
-// through sudo to the root copy. The plan is already computed by the caller.
-func Connect(ctx context.Context, plan *Plan, replace, foreground bool) error {
+// sudoInterruptCode is the exit status of a root copy that a signal stopped.
+const sudoInterruptCode = 130
+
+// ErrInterrupted reports that a signal stopped the root copy. sudo 1.9.14 and
+// later run it in a pseudo-terminal, so Ctrl-C reaches that child alone and
+// this process gets no signal of its own.
+var ErrInterrupted = errors.New("interrupted")
+
+// Connect starts the session. A session to the plan's address is already the
+// session the caller asks for, so Connect reports it and returns nil; a
+// session to another address is refused without replace. When the effective
+// uid is 0 it runs the start in-process; otherwise it re-execs through sudo to
+// the root copy. start is the time the command began, for the final line.
+func Connect(ctx context.Context, out, errw io.Writer, plan *Plan, replace, foreground bool, start time.Time) error {
 	plat := platform.New()
 
 	active, ae, err := activeSession(plat)
@@ -35,9 +47,14 @@ func Connect(ctx context.Context, plan *Plan, replace, foreground bool) error {
 	}
 	if active {
 		if !replace {
-			return ae
+			st := alreadyUp(plat, plan)
+			if st == nil {
+				return ae
+			}
+			_, err := fmt.Fprintf(out, "session to %s already up (%s); use --replace to restart\n", st.Remote, st.Uptime())
+			return err
 		}
-		if err := stopActive(ctx, plat); err != nil {
+		if err := stopActive(ctx, out, errw, plat); err != nil {
 			return fmt.Errorf("replace active session: %w", err)
 		}
 	}
@@ -48,20 +65,53 @@ func Connect(ctx context.Context, plan *Plan, replace, foreground bool) error {
 	}
 
 	if os.Geteuid() == 0 {
-		return Start(ctx, planJSON, foreground)
+		err = Start(ctx, errw, planJSON, foreground)
+	} else {
+		err = sudoStart(ctx, out, errw, planJSON, foreground, plan.Verbose)
 	}
-	return sudoStart(ctx, planJSON, foreground)
+	if err != nil {
+		return err
+	}
+	printUp(out, start)
+	return nil
+}
+
+// alreadyUp returns the state of the active session when its address is the
+// address of the plan. A missing state file returns nil, because the session
+// the unit runs is then unknown.
+func alreadyUp(plat platform.Platform, plan *Plan) *State {
+	st, err := ReadState(StatePath(plat.Paths.RuntimeDir()))
+	if err != nil || st.Addr != plan.Addr {
+		return nil
+	}
+	return st
+}
+
+// printUp prints the final line of a connect from the state the session
+// wrote. A state that is gone or unreadable prints no line, because the
+// connect itself succeeded.
+func printUp(w io.Writer, start time.Time) {
+	st, err := Active()
+	if err != nil {
+		slog.Warn("read session state", "error", err)
+		return
+	}
+	if st == nil {
+		return
+	}
+	_, _ = fmt.Fprintf(w, "session to %s up: %s, dns %s, %d networks, %s\n",
+		st.Remote, st.TransportLine(), st.DNS.Mode, len(st.Networks), time.Since(start).Round(100*time.Millisecond))
 }
 
 // stopActive ends the active session and waits until the unit is inactive, so
 // a following start does not clash with the old unit name.
-func stopActive(ctx context.Context, plat platform.Platform) error {
+func stopActive(ctx context.Context, out, errw io.Writer, plat platform.Platform) error {
 	if os.Geteuid() == 0 {
 		if err := Stop(); err != nil {
 			return err
 		}
 	} else {
-		if err := runSudo(ctx, nil, "_session", "stop"); err != nil {
+		if err := runSudo(ctx, out, errw, nil, "_session", "stop"); err != nil {
 			return err
 		}
 	}
@@ -91,16 +141,21 @@ func waitInactive(ctx context.Context, plat platform.Platform, timeout time.Dura
 
 // sudoStart re-execs the root copy under sudo -n and feeds the plan on stdin.
 // It first checks that the root copy version matches, so a stale copy fails
-// with a clear message instead of a subtle mismatch.
-func sudoStart(ctx context.Context, planJSON []byte, foreground bool) error {
+// with a clear message instead of a subtle mismatch. verbose puts -v on the
+// root copy, so its progress stream and its own log reach the terminal.
+func sudoStart(ctx context.Context, out, errw io.Writer, planJSON []byte, foreground, verbose bool) error {
 	if err := CheckRootCopy(ctx); err != nil {
 		return err
 	}
-	args := []string{"_session", "start"}
+	var args []string
+	if verbose {
+		args = append(args, "-v")
+	}
+	args = append(args, "_session", "start")
 	if foreground {
 		args = append(args, "--foreground")
 	}
-	return runSudo(ctx, planJSON, args...)
+	return runSudo(ctx, out, errw, planJSON, args...)
 }
 
 // CheckRootCopy runs the root copy's version command through sudo -n, so one
@@ -133,7 +188,7 @@ func exitStderr(err error) string {
 
 // runSudo runs the root copy under sudo -n with the given arguments. A nil
 // stdin leaves stdin empty; a non-nil stdin feeds the bytes, for the plan.
-func runSudo(ctx context.Context, stdin []byte, args ...string) error {
+func runSudo(ctx context.Context, out, errw io.Writer, stdin []byte, args ...string) error {
 	full := append([]string{"-n", RootCopy}, args...)
 	cmd := exec.CommandContext(ctx, "sudo", full...)
 	// SIGINT instead of the default kill: sudo relays the signal to the root
@@ -144,7 +199,15 @@ func runSudo(ctx context.Context, stdin []byte, args ...string) error {
 	if stdin != nil {
 		cmd.Stdin = bytes.NewReader(stdin)
 	}
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	return cmd.Run()
+	cmd.Stdout = out
+	cmd.Stderr = errw
+	err := cmd.Run()
+	// sudo runs the root copy in a pseudo-terminal, so a Ctrl-C reaches that
+	// child through the pty and this process gets no signal. The exit status
+	// of the child is then the only report of the interrupt.
+	var ee *exec.ExitError
+	if errors.As(err, &ee) && ee.ExitCode() == sudoInterruptCode {
+		return ErrInterrupted
+	}
+	return err
 }

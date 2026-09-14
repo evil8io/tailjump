@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"text/tabwriter"
-	"time"
 
 	"github.com/spf13/cobra"
 
@@ -54,11 +53,11 @@ func runStatus(cmd *cobra.Command, _ []string) error {
 	_, _ = fmt.Fprintf(tw, "Remote:\t%s (%s)\n", st.Remote, st.Addr)
 	_, _ = fmt.Fprintf(tw, "User:\t%s\n", st.User)
 	_, _ = fmt.Fprintf(tw, "Status:\t%s\n", st.Status)
-	_, _ = fmt.Fprintf(tw, "Transport:\t%s\n", transportLine(st))
+	_, _ = fmt.Fprintf(tw, "Transport:\t%s\n", st.TransportLine())
 	_, _ = fmt.Fprintf(tw, "Path:\t%s\n", path)
 	_, _ = fmt.Fprintf(tw, "Protocols:\t%s\n", valueOrDash(st.Protocols))
 	_, _ = fmt.Fprintf(tw, "DNS mode:\t%s\n", st.DNS.Mode)
-	_, _ = fmt.Fprintf(tw, "Uptime:\t%s\n", uptime(st.StartedAt))
+	_, _ = fmt.Fprintf(tw, "Uptime:\t%s\n", st.Uptime())
 	_, _ = fmt.Fprintf(tw, "Networks:\t%s\n", joinOrNone(st.Networks))
 	return tw.Flush()
 }
@@ -78,30 +77,4 @@ func sessionPath(ctx context.Context, st *session.State) *pathInfo {
 		}
 	}
 	return nil
-}
-
-func transportLine(st *session.State) string {
-	switch st.Transport {
-	case session.TransportQUIC:
-		return fmt.Sprintf("quic (port %d)", st.QUICPort)
-	case session.TransportSSH:
-		line := "ssh"
-		if st.Fallback != "" {
-			line += " (fallback: " + st.Fallback + ")"
-		}
-		if st.Lanes != "" {
-			line += ", lanes " + st.Lanes
-		}
-		return line
-	default:
-		return "unknown"
-	}
-}
-
-func uptime(startedAt string) string {
-	t, err := time.Parse(time.RFC3339, startedAt)
-	if err != nil {
-		return "unknown"
-	}
-	return time.Since(t).Round(time.Second).String()
 }

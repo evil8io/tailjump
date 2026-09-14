@@ -13,7 +13,7 @@ func newDisconnectCmd() *cobra.Command {
 		Short:   "End the active session",
 		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return session.Disconnect(cmd.Context())
+			return session.Disconnect(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr())
 		},
 	}
 }

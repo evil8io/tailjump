@@ -11,6 +11,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/evil8io/tailjump/internal/session"
 	"github.com/evil8io/tailjump/internal/version"
 )
 
@@ -49,10 +50,21 @@ func Execute() error {
 	}
 
 	cmd, err := newRootCmd().ExecuteContextC(ctx)
-	if ctx.Err() != nil && !exitsZeroOnSignal(cmd) {
+	if interrupted(ctx, cmd, err) {
 		return &ExitError{Code: exitInterrupted, Err: errors.New("interrupted")}
 	}
 	return err
+}
+
+// interrupted reports whether a signal stopped the command. sudo runs the
+// root copy in a pseudo-terminal, so a Ctrl-C during a connect can reach that
+// child alone: this process then has a live context and an error that wraps
+// session.ErrInterrupted.
+func interrupted(ctx context.Context, cmd *cobra.Command, err error) bool {
+	if exitsZeroOnSignal(cmd) {
+		return false
+	}
+	return ctx.Err() != nil || errors.Is(err, session.ErrInterrupted)
 }
 
 func exitsZeroOnSignal(cmd *cobra.Command) bool {

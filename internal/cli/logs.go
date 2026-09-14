@@ -17,7 +17,7 @@ func newLogsCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			lines, _ := cmd.Flags().GetInt("lines")
 			follow, _ := cmd.Flags().GetBool("follow")
-			return session.Logs(cmd.Context(), cmd.OutOrStdout(), platform.LogOptions{
+			return session.Logs(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), platform.LogOptions{
 				Lines:  lines,
 				Follow: follow,
 			})

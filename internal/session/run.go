@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/netip"
 	"os"
@@ -33,10 +34,18 @@ const upTimeout = 60 * time.Second
 // connect.
 const cancelStopTimeout = 25 * time.Second
 
+// streamGrace is the time the verbose log stream runs on after the wait ends.
+const streamGrace = time.Second
+
+// failTailLines is the number of session log lines a failed connect prints.
+const failTailLines = 20
+
 // Start writes the plan and starts the session. Without foreground it starts
 // the transient unit and waits for the state file to report up; with
-// foreground it runs the session in-process. Start runs as root.
-func Start(ctx context.Context, planJSON []byte, foreground bool) error {
+// foreground it runs the session in-process. Start runs as root. It writes to
+// errw only: the progress of the wait and the log tail of a failure. The
+// caller prints the final line, because it has the start time of the command.
+func Start(ctx context.Context, errw io.Writer, planJSON []byte, foreground bool) error {
 	plat := platform.New()
 	planPath := PlanPath(plat.Paths.RuntimeDir())
 	if err := writePlan(planPath, planJSON); err != nil {
@@ -45,12 +54,13 @@ func Start(ctx context.Context, planJSON []byte, foreground bool) error {
 	if foreground {
 		return Run(ctx, planPath)
 	}
+	unitStart := time.Now()
 	if err := plat.Runner.Start(planPath); err != nil {
 		return err
 	}
-	if err := waitForUp(ctx, plat); err != nil {
+	if err := waitForUp(ctx, errw, plat, unitStart); err != nil {
 		if ctx.Err() != nil {
-			return stopCancelled(ctx, plat)
+			return stopCancelled(ctx, errw, plat)
 		}
 		return err
 	}
@@ -61,7 +71,7 @@ func Start(ctx context.Context, planJSON []byte, foreground bool) error {
 // waits until the unit is inactive. The connect context is done, so the wait
 // gets its own deadline. A session that already came up stays up, because the
 // caller reaches this path on a failed wait only.
-func stopCancelled(ctx context.Context, plat platform.Platform) error {
+func stopCancelled(ctx context.Context, errw io.Writer, plat platform.Platform) error {
 	if err := plat.Runner.Stop(); err != nil {
 		slog.Warn("stop the cancelled session", "error", err)
 	}
@@ -70,25 +80,73 @@ func stopCancelled(ctx context.Context, plat platform.Platform) error {
 	if err := waitInactive(wait, plat, cancelStopTimeout); err != nil {
 		slog.Warn("wait for the cancelled session to stop", "error", err)
 	}
-	_, _ = fmt.Fprintln(os.Stderr, "connect cancelled; the session is stopped")
+	_, _ = fmt.Fprintln(errw, "connect cancelled; the session is stopped")
 	return ctx.Err()
 }
 
-func waitForUp(ctx context.Context, plat platform.Platform) error {
+// waitForUp waits until the session reports up. With debug logging on it
+// streams the session log to errw during the wait, so the steps of the unit
+// print as they happen. Without it a failure prints the last lines of that
+// log instead. A cancelled wait prints neither: the caller stops the unit and
+// reports the cancel.
+func waitForUp(ctx context.Context, errw io.Writer, plat platform.Platform, unitStart time.Time) error {
+	verbose := slog.Default().Enabled(ctx, slog.LevelDebug)
+	var stop func()
+	if verbose {
+		stop = streamLog(ctx, errw, plat, unitStart)
+	}
+	err := awaitUp(ctx, plat)
+	if verbose {
+		// The unit writes the state file before journald has its last
+		// lines, so the stream gets a moment to catch up.
+		if ctx.Err() == nil {
+			select {
+			case <-time.After(streamGrace):
+			case <-ctx.Done():
+			}
+		}
+		stop()
+	}
+	if err != nil && ctx.Err() == nil && !verbose {
+		if lerr := plat.Runner.Logs(ctx, errw, platform.LogOptions{Lines: failTailLines, Since: unitStart}); lerr != nil {
+			slog.Debug("read the session log tail", "error", lerr)
+		}
+	}
+	return err
+}
+
+// streamLog follows the session log to w in its own goroutine. The returned
+// function cancels the stream and waits for the goroutine, so no line arrives
+// after the caller returns.
+func streamLog(ctx context.Context, w io.Writer, plat platform.Platform, since time.Time) func() {
+	stream, cancel := context.WithCancel(ctx)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		if err := plat.Runner.Logs(stream, w, platform.LogOptions{Follow: true, Since: since}); err != nil {
+			slog.Debug("stream the session log", "error", err)
+		}
+	}()
+	return func() {
+		cancel()
+		<-done
+	}
+}
+
+func awaitUp(ctx context.Context, plat platform.Platform) error {
 	statePath := StatePath(plat.Paths.RuntimeDir())
 	start := time.Now()
 	deadline := start.Add(upTimeout)
 	for {
 		if st, err := ReadState(statePath); err == nil && st.Status == StatusUp {
-			_, _ = fmt.Fprintf(os.Stdout, "session to %s up, %d networks\n", st.Remote, len(st.Networks))
 			return nil
 		}
 		active, err := plat.Runner.Active()
 		if err == nil && !active && time.Since(start) > 3*time.Second {
-			return errors.New("the session unit exited before it came up; see tj logs")
+			return errors.New("the session unit exited before it came up; see tj logs for the full log")
 		}
 		if time.Now().After(deadline) {
-			return fmt.Errorf("timed out after %s waiting for the session to come up", upTimeout)
+			return fmt.Errorf("timed out after %s waiting for the session to come up; see tj logs for the full log", upTimeout)
 		}
 		select {
 		case <-ctx.Done():
@@ -119,6 +177,9 @@ func Run(ctx context.Context, planPath string) (err error) {
 	plan, err := ReadPlan(planPath)
 	if err != nil {
 		return err
+	}
+	if plan.Verbose {
+		slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug})))
 	}
 	addr, err := netip.ParseAddr(plan.Addr)
 	if err != nil {

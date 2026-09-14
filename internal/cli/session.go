@@ -48,7 +48,7 @@ func newSessionStartCmd() *cobra.Command {
 			if len(planJSON) == 0 {
 				return fmt.Errorf("read plan from stdin: empty plan")
 			}
-			return session.Start(cmd.Context(), planJSON, foreground)
+			return session.Start(cmd.Context(), cmd.ErrOrStderr(), planJSON, foreground)
 		},
 	}
 	cmd.Flags().Bool("foreground", false, "run the session in-process instead of a transient unit")
