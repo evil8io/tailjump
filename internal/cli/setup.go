@@ -5,21 +5,29 @@ import (
 	"os"
 	"os/exec"
 	"os/user"
+	"runtime"
 
 	"github.com/spf13/cobra"
+
+	"github.com/evil8io/tailjump/internal/session"
+	"github.com/evil8io/tailjump/internal/version"
 )
 
 const (
-	rootCopyDir  = "/usr/local/libexec/tj"
-	rootCopyPath = "/usr/local/libexec/tj/tj"
-	sudoersPath  = "/etc/sudoers.d/tj"
-	tunPath      = "/dev/net/tun"
+	rootCopyDir = "/usr/local/libexec/tj"
+	sudoersPath = "/etc/sudoers.d/tj"
+	tunPath     = "/dev/net/tun"
 )
 
 func newSetupCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "setup",
-		Short: "Write the sudoers rule and check the required tools",
+		Short: "Install the root copy and the sudoers rule",
+		Long: `tj setup installs a root copy of tj at /usr/local/libexec/tj/tj.
+It writes a sudoers rule that lets the root copy run without a password prompt.
+On Linux it also checks systemd-run and /dev/net/tun.
+It skips sudo when the root copy is already current.`,
+		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return runSetup(cmd)
 		},
@@ -28,7 +36,18 @@ func newSetupCmd() *cobra.Command {
 
 func runSetup(cmd *cobra.Command) error {
 	out := cmd.OutOrStdout()
-	if err := checkTools(cmd); err != nil {
+	ctx := cmd.Context()
+
+	if err := session.CheckRootCopy(ctx); err == nil {
+		_, err := fmt.Fprintf(out, "setup is current (%s)\n", version.Version)
+		return err
+	}
+
+	rows := toolCheckRows()
+	if err := printDoctor(cmd, rows, false); err != nil {
+		return err
+	}
+	if err := doctorResult(rows); err != nil {
 		return err
 	}
 
@@ -41,7 +60,7 @@ func runSetup(cmd *cobra.Command) error {
 		return fmt.Errorf("current user: %w", err)
 	}
 
-	_, _ = fmt.Fprintf(out, "installing the root copy at %s and the sudoers rule at %s\n", rootCopyPath, sudoersPath)
+	_, _ = fmt.Fprintf(out, "installing the root copy at %s and the sudoers rule at %s\n", session.RootCopy, sudoersPath)
 	_, _ = fmt.Fprintln(out, "sudo runs once and may prompt for your password")
 
 	if err := installRoot(self, u.Username); err != nil {
@@ -51,34 +70,35 @@ func runSetup(cmd *cobra.Command) error {
 	return nil
 }
 
-// checkTools verifies the tools a session needs. systemd-run and /dev/net/tun
-// are required; resolvectl is only for split and all DNS, so a missing one is
-// a warning.
-func checkTools(cmd *cobra.Command) error {
-	out := cmd.OutOrStdout()
+// toolCheckRows checks the local tools a session needs. Linux needs
+// systemd-run to start the session unit and /dev/net/tun for the TUN
+// device; macOS needs neither. tj doctor and tj setup share the rows.
+func toolCheckRows() []doctorCheck {
+	if runtime.GOOS != "linux" {
+		return nil
+	}
+	return []doctorCheck{systemdRunCheck(), tunDeviceCheck()}
+}
+
+func systemdRunCheck() doctorCheck {
 	if _, err := exec.LookPath("systemd-run"); err != nil {
-		return fmt.Errorf("systemd-run is not on PATH; tj needs systemd to run a session")
+		return failCheck("systemd-run", fmt.Errorf("systemd-run is not on PATH; tj needs systemd to run a session"))
 	}
-	_, _ = fmt.Fprintln(out, "systemd-run: ok")
+	return okCheck("systemd-run", "ok")
+}
 
+func tunDeviceCheck() doctorCheck {
 	if _, err := os.Stat(tunPath); err != nil {
-		return fmt.Errorf("%s is missing; load the tun module", tunPath)
+		return failCheck(tunPath, fmt.Errorf("%s is missing; load the tun module", tunPath))
 	}
-	_, _ = fmt.Fprintln(out, tunPath+": ok")
-
-	if _, err := exec.LookPath("resolvectl"); err != nil {
-		_, _ = fmt.Fprintln(out, "resolvectl: absent (split and all DNS need systemd-resolved; none works without it)")
-	} else {
-		_, _ = fmt.Fprintln(out, "resolvectl: ok")
-	}
-	return nil
+	return okCheck(tunPath, "ok")
 }
 
 // installRoot copies the binary and writes the sudoers rule in one privileged
 // shell, validated with visudo. It removes the sudoers file when visudo
 // rejects it, so a syntax error never leaves a broken rule.
 func installRoot(self, username string) error {
-	rule := fmt.Sprintf("%s ALL=(root) NOPASSWD: %s", username, rootCopyPath)
+	rule := fmt.Sprintf("%s ALL=(root) NOPASSWD: %s", username, session.RootCopy)
 	script := fmt.Sprintf(`set -e
 install -d -m 0755 -o root -g root %q
 install -m 0755 -o root -g root %q %q
@@ -86,7 +106,7 @@ umask 077
 printf '%%s\n' %q > %q
 chmod 0440 %q
 if ! visudo -cf %q; then rm -f %q; echo "sudoers validation failed" >&2; exit 1; fi
-`, rootCopyDir, self, rootCopyPath, rule, sudoersPath, sudoersPath, sudoersPath, sudoersPath)
+`, rootCopyDir, self, session.RootCopy, rule, sudoersPath, sudoersPath, sudoersPath, sudoersPath)
 
 	cmd := exec.Command("sudo", "sh", "-c", script)
 	cmd.Stdin = os.Stdin

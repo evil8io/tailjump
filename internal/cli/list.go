@@ -20,6 +20,9 @@ import (
 
 const (
 	probeTimeout = 5 * time.Second
+	// probeConcurrency bounds how many peers tj list --probe probes at
+	// once, so a large tailnet opens only that many SSH connections.
+	probeConcurrency = 8
 
 	// The --path pings: the first pong to a peer with a direct path can
 	// arrive over DERP, so the ping repeats until a direct pong or the
@@ -41,18 +44,29 @@ func newListCmd() *cobra.Command {
 		Use:     "list",
 		Aliases: []string{"ls"},
 		Short:   "List the online tailnet peers",
-		RunE:    runList,
+		Long: `tj list prints every online tailnet peer, with its alias, tags, and address.
+--tag filters the peers by tag, and --path pings an idle peer to learn its route.
+--probe opens SSH to each peer, 8 at a time, and marks whether it has a manifest.
+It caches no probe result, so each run opens SSH again.`,
+		Example: `  tj list
+  tj list --tag tag:example
+  tj list --probe --json`,
+		Args: cobra.NoArgs,
+		RunE: runList,
 	}
 	cmd.Flags().String("tag", "", "list only peers with this tag")
 	cmd.Flags().Bool("probe", false, "open SSH to each peer and mark the ones with a manifest")
 	cmd.Flags().Bool("path", false, "ping each idle peer to learn whether its path is direct or relayed")
 	cmd.Flags().String("user", "", "the SSH user for --probe")
 	cmd.Flags().Bool("json", false, "print JSON output")
+	_ = cmd.RegisterFlagCompletionFunc("tag", completeTag)
+	_ = cmd.RegisterFlagCompletionFunc("user", cobra.NoFileCompletions)
 	return cmd
 }
 
 type listEntry struct {
 	HostName string    `json:"hostname"`
+	Aliases  []string  `json:"aliases,omitempty"`
 	Tags     []string  `json:"tags,omitempty"`
 	Address  string    `json:"address,omitempty"`
 	Session  string    `json:"session,omitempty"`
@@ -108,6 +122,25 @@ func sessionOf(st *session.State, address string) string {
 	return ""
 }
 
+// aliasesByHost resolves every config alias to the online peer that
+// tj connect <alias> would select, keyed by the peer's HostName. An alias
+// whose host matches no online peer is dropped.
+func aliasesByHost(peers []tailnet.Peer, cfg *config.Config) map[string][]string {
+	aliases := map[string][]string{}
+	for _, alias := range sortedRemoteAliases(cfg) {
+		host := cfg.Remotes[alias].Host
+		if host == "" {
+			continue
+		}
+		peer, err := tailnet.Resolve(peers, host)
+		if err != nil {
+			continue
+		}
+		aliases[peer.HostName] = append(aliases[peer.HostName], alias)
+	}
+	return aliases
+}
+
 func orDash(s string) string {
 	if s == "" {
 		return "-"
@@ -136,15 +169,15 @@ func runList(cmd *cobra.Command, _ []string) error {
 		slog.Warn("read session state", "error", err)
 	}
 
-	var cfg *config.Config
-	if probe {
-		cfg, err = loadLocalConfig()
-		if err != nil {
-			return fmt.Errorf("load config: %w", err)
-		}
+	cfg, err := loadLocalConfig()
+	if err != nil {
+		slog.Warn("load config", "error", err)
+		cfg = &config.Config{}
 	}
+	aliases := aliasesByHost(st.Peers, cfg)
 
 	var entries []listEntry
+	var peers []tailnet.Peer
 	for _, p := range st.Peers {
 		if !p.Online {
 			continue
@@ -152,10 +185,15 @@ func runList(cmd *cobra.Command, _ []string) error {
 		if tag != "" && !tailnet.HasTag(p.Tags, tag) {
 			continue
 		}
-		entry := buildListEntry(ctx, p, probe, cfg, flagUser)
+		entry := buildListEntry(p)
+		entry.Aliases = aliases[p.HostName]
 		entry.Session = sessionOf(active, entry.Address)
 		entry.Path = pathOf(p)
 		entries = append(entries, entry)
+		peers = append(peers, p)
+	}
+	if probe {
+		probeEntries(ctx, peers, entries, cfg, flagUser)
 	}
 	if pingIdle {
 		pingIdlePaths(ctx, tc, entries)
@@ -167,7 +205,7 @@ func runList(cmd *cobra.Command, _ []string) error {
 	return printListTable(cmd, entries, probe)
 }
 
-func buildListEntry(ctx context.Context, p tailnet.Peer, probe bool, cfg *config.Config, flagUser string) listEntry {
+func buildListEntry(p tailnet.Peer) listEntry {
 	entry := listEntry{HostName: p.HostName, Tags: p.Tags}
 
 	addr, err := p.IPv4()
@@ -176,16 +214,43 @@ func buildListEntry(ctx context.Context, p tailnet.Peer, probe bool, cfg *config
 		return entry
 	}
 	entry.Address = addr.String()
-
-	if probe {
-		has, perr := probeManifest(ctx, p, addr, cfg, flagUser)
-		if perr != nil {
-			entry.Error = perr.Error()
-		} else {
-			entry.Manifest = &has
-		}
-	}
 	return entry
+}
+
+// probePeer probes one peer for a manifest. A test replaces it so
+// probeEntries can run its parallel path without SSH.
+var probePeer = probeManifest
+
+// probeEntries probes every entry that has an address, at most
+// probeConcurrency at a time, and writes each result to its own entry. This
+// keeps the output in the order of entries, the tailnet status order.
+func probeEntries(ctx context.Context, peers []tailnet.Peer, entries []listEntry, cfg *config.Config, flagUser string) {
+	sem := make(chan struct{}, probeConcurrency)
+	var wg sync.WaitGroup
+	for i := range entries {
+		e := &entries[i]
+		if e.Address == "" {
+			continue
+		}
+		p := peers[i]
+		addr, err := p.IPv4()
+		if err != nil {
+			continue
+		}
+		wg.Add(1)
+		sem <- struct{}{}
+		go func() {
+			defer wg.Done()
+			defer func() { <-sem }()
+			has, perr := probePeer(ctx, p, addr, cfg, flagUser)
+			if perr != nil {
+				e.Error = perr.Error()
+			} else {
+				e.Manifest = &has
+			}
+		}()
+	}
+	wg.Wait()
 }
 
 // probeManifest opens a short-lived SSH connection to the peer and runs
@@ -263,18 +328,19 @@ func pingPath(ctx context.Context, tc *tailnet.Client, addr netip.Addr) *pathInf
 func printListTable(cmd *cobra.Command, entries []listEntry, probe bool) error {
 	w := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 4, 2, ' ', 0)
 	if probe {
-		_, _ = fmt.Fprintln(w, "HOSTNAME\tTAGS\tADDRESS\tSESSION\tPATH\tMANIFEST")
+		_, _ = fmt.Fprintln(w, "HOSTNAME\tALIAS\tTAGS\tADDRESS\tSESSION\tPATH\tMANIFEST")
 	} else {
-		_, _ = fmt.Fprintln(w, "HOSTNAME\tTAGS\tADDRESS\tSESSION\tPATH")
+		_, _ = fmt.Fprintln(w, "HOSTNAME\tALIAS\tTAGS\tADDRESS\tSESSION\tPATH")
 	}
 	for _, e := range entries {
+		alias := joinOrDash(e.Aliases)
 		tags := strings.Join(e.Tags, ",")
 		addr := e.Address
 		if addr == "" {
 			addr = "error: " + e.Error
 		}
 		if !probe {
-			_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", e.HostName, tags, addr, orDash(e.Session), e.Path)
+			_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n", e.HostName, alias, tags, addr, orDash(e.Session), e.Path)
 			continue
 		}
 		manifest := "-"
@@ -286,7 +352,7 @@ func printListTable(cmd *cobra.Command, entries []listEntry, probe bool) error {
 		case e.Manifest != nil:
 			manifest = "no"
 		}
-		_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n", e.HostName, tags, addr, orDash(e.Session), e.Path, manifest)
+		_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n", e.HostName, alias, tags, addr, orDash(e.Session), e.Path, manifest)
 	}
 	return w.Flush()
 }

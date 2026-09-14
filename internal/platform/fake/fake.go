@@ -4,9 +4,13 @@
 package fake
 
 import (
+	"context"
+	"io"
 	"net/netip"
 
 	"golang.zx2c4.com/wireguard/tun"
+
+	"github.com/evil8io/tailjump/internal/platform"
 )
 
 // Device is a fake platform.Device.
@@ -129,16 +133,21 @@ func (r *Resolver) Revert(device string) error {
 	return r.RevertErr
 }
 
+// LogLines are the lines Runner.Logs writes to w.
+var LogLines = []string{"fake session log line 1", "fake session log line 2"}
+
 // Runner is a fake platform.Runner.
 type Runner struct {
 	StartCalls  []string
 	StopCalls   int
 	ActiveCalls int
+	LogsCalls   []platform.LogOptions
 
 	StartErr    error
 	StopErr     error
 	ActiveErr   error
 	ActiveValue bool
+	LogsErr     error
 }
 
 func (r *Runner) Start(plan string) error {
@@ -154,6 +163,19 @@ func (r *Runner) Stop() error {
 func (r *Runner) Active() (bool, error) {
 	r.ActiveCalls++
 	return r.ActiveValue, r.ActiveErr
+}
+
+func (r *Runner) Logs(_ context.Context, w io.Writer, opts platform.LogOptions) error {
+	r.LogsCalls = append(r.LogsCalls, opts)
+	if r.LogsErr != nil {
+		return r.LogsErr
+	}
+	for _, line := range LogLines {
+		if _, err := io.WriteString(w, line+"\n"); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // Paths is a fake platform.Paths.

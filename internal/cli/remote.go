@@ -14,6 +14,7 @@ import (
 func newRemoteCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:    "_remote",
+		Short:  "Serve the mux protocol over stdin and stdout",
 		Hidden: true,
 		RunE: func(_ *cobra.Command, _ []string) error {
 			return helper.Run(os.Stdin, os.Stdout, os.Stderr)

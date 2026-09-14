@@ -4,13 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log/slog"
-	"net/netip"
+	"os"
 	"text/tabwriter"
 
 	"github.com/spf13/cobra"
 
-	"github.com/evil8io/tailjump/internal/config"
 	"github.com/evil8io/tailjump/internal/discovery"
 	"github.com/evil8io/tailjump/internal/dns"
 	"github.com/evil8io/tailjump/internal/helper"
@@ -18,26 +16,64 @@ import (
 	"github.com/evil8io/tailjump/internal/platform"
 	"github.com/evil8io/tailjump/internal/session"
 	"github.com/evil8io/tailjump/internal/sshc"
+	"github.com/evil8io/tailjump/internal/version"
 )
 
 func newDoctorCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "doctor <remote>",
-		Short: "Run the manifest checks from the remote and from the client",
-		Args:  cobra.ExactArgs(1),
-		RunE:  runDoctor,
+		Use:   "doctor [remote]",
+		Short: "Check the client, then the remote",
+		Long: `tj doctor runs the client checks: the tj version, the tailnet status, the root copy, and the local DNS resolver.
+tj doctor <remote> adds the remote checks: the peer, SSH, discovery, and the manifest.
+It also checks the session networks, the DNS mode, the QUIC transport, and the echo socket.
+Each row is ok, fail, or info, and a fail row sets the exit code to 1.`,
+		Example: `  tj doctor
+  tj doctor gw.example
+  tj doctor tag:example --json`,
+		Args:              cobra.MaximumNArgs(1),
+		RunE:              runDoctor,
+		ValidArgsFunction: completeRemote,
 	}
 	cmd.Flags().String("user", "", "the SSH user")
 	cmd.Flags().Bool("json", false, "print JSON output")
+	_ = cmd.RegisterFlagCompletionFunc("user", cobra.NoFileCompletions)
 	return cmd
 }
 
-// doctorCheck is one line of tj doctor output: a fact or a pass/fail
-// result. Value carries the fact for an informational check and "ok" or
-// "fail: <reason>" for a pass/fail one.
+// Row statuses. A fail row sets the command's exit code to 1.
+const (
+	statusOK   = "ok"
+	statusFail = "fail"
+	statusInfo = "info"
+)
+
+// doctorCheck is one row of tj doctor output: a check name, a detail value,
+// and a status of ok, fail, or info.
 type doctorCheck struct {
-	Name  string `json:"name"`
-	Value string `json:"value"`
+	Name   string `json:"name"`
+	Value  string `json:"value"`
+	Status string `json:"status"`
+}
+
+func infoCheck(name, value string) doctorCheck {
+	return doctorCheck{Name: name, Value: value, Status: statusInfo}
+}
+
+func okCheck(name, value string) doctorCheck {
+	return doctorCheck{Name: name, Value: value, Status: statusOK}
+}
+
+func failCheck(name string, err error) doctorCheck {
+	return doctorCheck{Name: name, Value: err.Error(), Status: statusFail}
+}
+
+// resultCheck reports a pass/fail check: "ok" on a nil error, the error text
+// on a non-nil one.
+func resultCheck(name string, err error) doctorCheck {
+	if err != nil {
+		return failCheck(name, err)
+	}
+	return okCheck(name, "ok")
 }
 
 func runDoctor(cmd *cobra.Command, args []string) error {
@@ -45,87 +81,134 @@ func runDoctor(cmd *cobra.Command, args []string) error {
 	flagUser, _ := cmd.Flags().GetString("user")
 	ctx := cmd.Context()
 
+	checks := clientChecks(ctx)
+	if len(args) == 0 {
+		return finishDoctor(cmd, checks, asJSON)
+	}
+	add := func(c doctorCheck) { checks = append(checks, c) }
+
 	cfg, err := loadLocalConfig()
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
 	}
 
-	var checks []doctorCheck
-	add := func(name, value string) { checks = append(checks, doctorCheck{Name: name, Value: value}) }
-	addErr := func(name string, err error) {
-		if err != nil {
-			add(name, "fail: "+err.Error())
-		} else {
-			add(name, "ok")
-		}
-	}
-
 	rr, err := resolveRemote(ctx, newTailnetClient(), cfg, args[0], flagUser)
-	addErr("peer online", err)
+	add(resultCheck("peer online", err))
 	if err != nil {
-		return printDoctor(cmd, checks, asJSON)
+		return finishDoctor(cmd, checks, asJSON)
 	}
-	add("peer", fmt.Sprintf("%s (%s)", rr.Peer.HostName, rr.Addr))
+	add(infoCheck("peer", fmt.Sprintf("%s (%s)", rr.Peer.HostName, rr.Addr)))
 
 	client, err := dialRemote(ctx, rr.Addr, rr.Peer.HostName, rr.User)
-	addErr("ssh ok", err)
+	add(resultCheck("ssh ok", err))
 	if err != nil {
-		return printDoctor(cmd, checks, asJSON)
+		return finishDoctor(cmd, checks, asJSON)
 	}
 	defer func() { _ = client.Close() }()
-	add("banner", "printed to stderr, if the remote sent one")
 
 	res, err := runDiscovery(client)
-	addErr("discovery ok", err)
+	add(resultCheck("discovery ok", err))
 	if err != nil {
-		return printDoctor(cmd, checks, asJSON)
+		return finishDoctor(cmd, checks, asJSON)
 	}
-	add("manifest", valueOrAbsent(res.ManifestPath))
-	add("exec dir", valueOrAbsent(res.ExecDir))
+	add(infoCheck("manifest", valueOrAbsent(res.ManifestPath)))
+	add(infoCheck("exec dir", valueOrAbsent(res.ExecDir)))
+
+	if arch, archErr := helper.ArchForUname(res.UnameM); archErr != nil {
+		add(failCheck("helper arch", archErr))
+	} else {
+		add(infoCheck("helper arch", arch))
+	}
 
 	m, err := decodeDoctorManifest(res)
-	addErr("parse manifest", err)
+	add(resultCheck("parse manifest", err))
 	if err != nil {
-		return printDoctor(cmd, checks, asJSON)
+		return finishDoctor(cmd, checks, asJSON)
 	}
 
-	networks, err := doctorSessionNetworks(m, res, cfg, rr)
+	networks, _, err := sessionNetworks(m, res, cfg, rr, nil, nil)
 	if err == nil && len(networks) == 0 {
 		err = fmt.Errorf("the session network list is empty")
 	}
-	addErr("session networks non-empty", err)
+	add(resultCheck("session networks non-empty", err))
 	if err == nil {
-		add("session networks", joinOrNone(prefixStrings(networks)))
+		add(infoCheck("session networks", joinOrNone(prefixStrings(networks))))
 	}
 
-	if platform.New().Resolver.Available() {
-		add("dns mode availability", "resolved available: split and all both work")
-	} else {
-		add("dns mode availability", "resolved not available: only all (resolv.conf fallback) works, split needs resolved")
-	}
-	add("dns default mode", string(dns.Default(m.DNS != nil && len(m.DNS.Domains) > 0)))
-
-	add("remote manifest checks", "pending (needs the helper)")
+	add(infoCheck("dns default mode", string(dns.Default(m.DNS != nil && len(m.DNS.Domains) > 0))))
 
 	probe, err := doctorProbe(ctx, client, res, m, rr)
 	switch {
 	case err != nil:
-		add("quic transport", "fail: "+err.Error())
-		add("icmp echo socket", "fail: "+err.Error())
+		add(failCheck("quic transport", err))
+		add(failCheck("icmp echo socket", err))
 	default:
 		if probe.QUICErr != nil {
-			add("quic transport", "fail: "+probe.QUICErr.Error())
+			add(failCheck("quic transport", probe.QUICErr))
 		} else {
-			add("quic transport", fmt.Sprintf("ok, port %d", probe.QUICPort))
+			add(okCheck("quic transport", fmt.Sprintf("port %d", probe.QUICPort)))
 		}
 		if probe.EchoErr != nil {
-			add("icmp echo socket", "fail: "+probe.EchoErr.Error())
+			add(failCheck("icmp echo socket", probe.EchoErr))
 		} else {
-			add("icmp echo socket", probe.Echo.String())
+			add(infoCheck("icmp echo socket", probe.Echo.String()))
 		}
 	}
 
-	return printDoctor(cmd, checks, asJSON)
+	return finishDoctor(cmd, checks, asJSON)
+}
+
+// clientChecks runs the checks that need no remote: the own version, the
+// local tailnet status, the root copy, the session tools, and the local DNS
+// resolver.
+func clientChecks(ctx context.Context) []doctorCheck {
+	checks := []doctorCheck{
+		infoCheck("tj version", version.Version),
+		tailnetCheck(ctx),
+		rootCopyCheck(ctx),
+	}
+	checks = append(checks, toolCheckRows()...)
+	checks = append(checks, resolverCheck())
+	return checks
+}
+
+// tailnetCheck reads the local tailnet status. A dial failure names the
+// socket, because tailnet.Client.Status names it in the error.
+func tailnetCheck(ctx context.Context) doctorCheck {
+	st, err := newTailnetClient().Status(ctx)
+	if err != nil {
+		return failCheck("tailnet", err)
+	}
+	online := 0
+	for _, p := range st.Peers {
+		if p.Online {
+			online++
+		}
+	}
+	return infoCheck("tailnet", fmt.Sprintf("%s, %d online peers", st.Self.HostName, online))
+}
+
+// rootCopyCheck checks the root copy through session.CheckRootCopy, which in
+// one call checks the file, the version, and the sudo rule. connect runs
+// in-process as root and never uses the root copy there, so the row is
+// informational when the effective uid is 0.
+func rootCopyCheck(ctx context.Context) doctorCheck {
+	if os.Geteuid() == 0 {
+		return infoCheck("root copy", "not needed as root")
+	}
+	if err := session.CheckRootCopy(ctx); err != nil {
+		return failCheck("root copy", err)
+	}
+	return okCheck("root copy", version.Version)
+}
+
+// resolverCheck reports whether the platform DNS resolver service is
+// available. This row replaces the earlier dns mode availability row.
+func resolverCheck() doctorCheck {
+	if platform.New().Resolver.Available() {
+		return infoCheck("systemd-resolved", "available: split and all work")
+	}
+	return infoCheck("systemd-resolved", "not available: only all works")
 }
 
 // doctorProbe brings the QUIC transport up through a temporary helper and
@@ -152,59 +235,7 @@ func decodeDoctorManifest(res *discovery.Result) (*manifest.Manifest, error) {
 	if err != nil {
 		return nil, err
 	}
-	if len(body) == 0 {
-		return manifest.Empty(), nil
-	}
-	return manifest.Parse(body)
-}
-
-// doctorSessionNetworks mirrors buildDescribeOutput's network computation,
-// so tj doctor and tj describe report the same session networks for the
-// same remote.
-func doctorSessionNetworks(m *manifest.Manifest, res *discovery.Result, cfg *config.Config, rr *resolvedRemote) ([]netip.Prefix, error) {
-	// Include the remote manifest and discovery, plus the remote-config
-	// networks; exclude the manifest, config, and remote-config excludes.
-	includeNetworks := append(append([]string{}, m.Networks...), rr.Config.Networks...)
-	manifestNetworks, err := manifest.ParsePrefixes(includeNetworks)
-	if err != nil {
-		return nil, fmt.Errorf("networks: %w", err)
-	}
-	manifestExclude, err := manifest.ParsePrefixes(m.Exclude)
-	if err != nil {
-		return nil, fmt.Errorf("manifest exclude: %w", err)
-	}
-	localExcludeList := append(append([]string{}, cfg.Exclude...), rr.Config.Exclude...)
-	localExclude, err := manifest.ParsePrefixes(localExcludeList)
-	if err != nil {
-		return nil, fmt.Errorf("local config exclude: %w", err)
-	}
-
-	var linkRoutes, cloudNets []netip.Prefix
-	if m.LinkRoutesEnabled() {
-		if linkRoutes, err = res.LinkRoutePrefixes(); err != nil {
-			return nil, fmt.Errorf("discovery link routes: %w", err)
-		}
-	}
-	if m.CloudEnabled() {
-		if cloudNets, err = res.CloudNetworkPrefixes(); err != nil {
-			return nil, fmt.Errorf("discovery cloud networks: %w", err)
-		}
-	}
-
-	networks, err := manifest.ComputeNetworks(manifest.Inputs{
-		ManifestNetworks:    manifestNetworks,
-		ManifestExclude:     manifestExclude,
-		DiscoveryLinkRoutes: linkRoutes,
-		DiscoveryCloud:      cloudNets,
-		RemoteAddrs:         rr.Peer.TailscaleIPs,
-		ClientConnected:     clientConnected(),
-		LocalExclude:        localExclude,
-	})
-	if err != nil {
-		return nil, err
-	}
-	slog.Debug("session networks", "count", len(networks), "networks", prefixStrings(networks))
-	return networks, nil
+	return decodeManifest(body)
 }
 
 func valueOrAbsent(s string) string {
@@ -220,7 +251,42 @@ func printDoctor(cmd *cobra.Command, checks []doctorCheck, asJSON bool) error {
 	}
 	w := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 4, 2, ' ', 0)
 	for _, c := range checks {
-		_, _ = fmt.Fprintf(w, "%s:\t%s\n", c.Name, c.Value)
+		_, _ = fmt.Fprintf(w, "%s\t%s\t%s\n", displayStatus(c.Status), c.Name, c.Value)
 	}
 	return w.Flush()
+}
+
+// displayStatus uppercases a fail status, so a failing row stands out in the
+// human table.
+func displayStatus(status string) string {
+	if status == statusFail {
+		return "FAIL"
+	}
+	return status
+}
+
+// finishDoctor prints the report, then fails the command when one or more
+// checks failed, so a script that runs tj doctor sees a non-zero exit.
+func finishDoctor(cmd *cobra.Command, checks []doctorCheck, asJSON bool) error {
+	if err := printDoctor(cmd, checks, asJSON); err != nil {
+		return err
+	}
+	return doctorResult(checks)
+}
+
+func doctorResult(checks []doctorCheck) error {
+	n := 0
+	for _, c := range checks {
+		if c.Status == statusFail {
+			n++
+		}
+	}
+	if n == 0 {
+		return nil
+	}
+	plural := "s"
+	if n == 1 {
+		plural = ""
+	}
+	return &ExitError{Code: 1, Err: fmt.Errorf("%d check%s failed", n, plural)}
 }

@@ -4,8 +4,9 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"net/netip"
 	"os"
+	"text/tabwriter"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -29,38 +30,47 @@ func newConnectCmd() *cobra.Command {
 		Use:     "connect <remote>",
 		Aliases: []string{"up"},
 		Short:   "Start a session into the remote's network",
-		Args:    cobra.ExactArgs(1),
-		RunE:    runConnect,
+		Long: `tj connect <remote> starts a session into the remote's network over Tailscale SSH.
+Each flag wins over the matching alias field, which wins over the config default.
+It creates the tj0 device, adds the session routes, and applies the DNS mode on the client.
+A connect to the remote of the active session prints already up and exits 0, unless --replace or the remote differs.`,
+		Example: `  tj connect tag:example --dns split
+  tj connect gw.example --protocols tcp,udp --network 10.0.0.0/16
+  # print the plan and start no session
+  tj connect gw.example --dry-run`,
+		Args:              cobra.ExactArgs(1),
+		RunE:              runConnect,
+		ValidArgsFunction: completeRemote,
 	}
 	cmd.Flags().String("user", "", "the SSH user")
-	cmd.Flags().String("dns", "", "the DNS mode: none, split, or all")
-	cmd.Flags().String("transport", "", "the data plane transport: auto, quic, or ssh")
-	cmd.Flags().String("protocols", "", "the protocols to forward, a list of tcp, udp, and icmp")
+	cmd.Flags().Var(&dnsModeValue{}, "dns", "the DNS mode")
+	cmd.Flags().Var(&transportModeValue{}, "transport", "the data plane transport")
+	cmd.Flags().Var(&protocolSetValue{}, "protocols", "the protocols to forward")
 	cmd.Flags().StringArray("network", nil, "an extra CIDR to route, on top of the manifest and discovery, repeatable")
 	cmd.Flags().StringArray("exclude", nil, "a CIDR to exclude from the session, repeatable")
 	cmd.Flags().Bool("no-discovery", false, "skip discovery")
 	cmd.Flags().Bool("replace", false, "end the active session first")
+	cmd.Flags().Bool("dry-run", false, "print the plan and exit, without a session")
+	cmd.Flags().Bool("json", false, "print the plan as JSON; needs --dry-run")
+	registerRemoteFlagCompletions(cmd)
 	return cmd
 }
 
 func runConnect(cmd *cobra.Command, args []string) error {
+	start := time.Now()
 	flagUser, _ := cmd.Flags().GetString("user")
-	dnsFlag, _ := cmd.Flags().GetString("dns")
-	transportFlag, _ := cmd.Flags().GetString("transport")
-	protocolsFlag, _ := cmd.Flags().GetString("protocols")
+	verbose, _ := cmd.Flags().GetBool("verbose")
+	dnsFlag := flagString(cmd, "dns")
+	transportFlag := flagString(cmd, "transport")
+	protocolsFlag := flagString(cmd, "protocols")
 	networkFlags, _ := cmd.Flags().GetStringArray("network")
 	excludeFlags, _ := cmd.Flags().GetStringArray("exclude")
 	noDiscovery, _ := cmd.Flags().GetBool("no-discovery")
 	replace, _ := cmd.Flags().GetBool("replace")
-
-	if dnsFlag != "" && !dns.Valid(dnsFlag) {
-		return fmt.Errorf("invalid --dns %q, want none, split, or all", dnsFlag)
-	}
-	if transportFlag != "" && !transport.Valid(transportFlag) {
-		return fmt.Errorf("invalid --transport %q, want auto, quic, or ssh", transportFlag)
-	}
-	if protocolsFlag != "" && !protocols.Valid(protocolsFlag) {
-		return fmt.Errorf("invalid --protocols %q, want a list of tcp, udp, and icmp", protocolsFlag)
+	dryRun, _ := cmd.Flags().GetBool("dry-run")
+	asJSON, _ := cmd.Flags().GetBool("json")
+	if asJSON && !dryRun {
+		return &ExitError{Code: 2, Err: errors.New("--json needs --dry-run")}
 	}
 
 	ctx := cmd.Context()
@@ -71,6 +81,9 @@ func runConnect(cmd *cobra.Command, args []string) error {
 	rr, err := resolveRemote(ctx, newTailnetClient(), cfg, args[0], flagUser)
 	if err != nil {
 		return err
+	}
+	if !dryRun {
+		_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "connecting to %s (%s) as %s\n", rr.Peer.HostName, rr.Addr, rr.User)
 	}
 
 	client, err := dialRemote(ctx, rr.Addr, rr.Peer.HostName, rr.User)
@@ -85,18 +98,52 @@ func runConnect(cmd *cobra.Command, args []string) error {
 		protocols: protocolsFlag,
 		networks:  networkFlags,
 		excludes:  excludeFlags,
+		verbose:   verbose,
 	}, noDiscovery)
 	if err != nil {
 		return err
 	}
 
-	err = session.Connect(ctx, plan, replace, false)
+	if dryRun {
+		return printPlan(cmd, plan, asJSON)
+	}
+
+	err = session.Connect(ctx, cmd.OutOrStdout(), cmd.ErrOrStderr(), plan, replace, false, start)
 	var ae *session.ActiveError
 	if errors.As(err, &ae) {
-		fmt.Fprintln(os.Stderr, "Error:", ae)
-		os.Exit(exitActiveSession)
+		return &ExitError{Code: exitActiveSession, Err: ae}
 	}
 	return err
+}
+
+// printPlan prints the plan that connect would hand to _session start. It
+// does not start a session. The human layout matches describe: asJSON
+// prints the exact bytes _session start reads from stdin.
+func printPlan(cmd *cobra.Command, plan *session.Plan, asJSON bool) error {
+	if asJSON {
+		b, err := plan.Marshal()
+		if err != nil {
+			return err
+		}
+		_, err = fmt.Fprintln(cmd.OutOrStdout(), string(b))
+		return err
+	}
+
+	w := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 4, 2, ' ', 0)
+	_, _ = fmt.Fprintf(w, "Remote:\t%s (%s)\n", plan.Remote, plan.Addr)
+	_, _ = fmt.Fprintf(w, "User:\t%s\n", plan.User)
+	_, _ = fmt.Fprintf(w, "Transport:\t%s\n", plan.Transport)
+	_, _ = fmt.Fprintf(w, "QUIC ports:\t%s\n", plan.QUICPorts)
+	_, _ = fmt.Fprintf(w, "Protocols:\t%s\n", plan.Protocols)
+	_, _ = fmt.Fprintf(w, "DNS mode:\t%s\n", plan.DNS.Mode)
+	_, _ = fmt.Fprintf(w, "DNS servers:\t%s\n", joinOrNone(plan.DNS.Servers))
+	_, _ = fmt.Fprintf(w, "DNS domains:\t%s\n", joinOrNone(plan.DNS.Domains))
+	_, _ = fmt.Fprintf(w, "Helper arch:\t%s\n", plan.HelperArch)
+	_, _ = fmt.Fprintln(w, "Networks:")
+	for _, n := range plan.Networks {
+		_, _ = fmt.Fprintf(w, "  %s\n", n)
+	}
+	return w.Flush()
 }
 
 // planFlags are the connect flags that shape the plan.
@@ -106,6 +153,7 @@ type planFlags struct {
 	protocols string
 	networks  []string
 	excludes  []string
+	verbose   bool
 }
 
 // buildPlan runs discovery, computes the session networks, resolves the DNS
@@ -118,18 +166,20 @@ func buildPlan(client *sshc.Client, rr *resolvedRemote, cfg *config.Config, ref 
 		return nil, fmt.Errorf("discovery: %w", err)
 	}
 
-	m := manifest.Empty()
 	body, err := res.DecodedManifest()
 	if err != nil {
 		return nil, fmt.Errorf("decode manifest: %w", err)
 	}
-	if len(body) > 0 {
-		if m, err = manifest.Parse(body); err != nil {
-			return nil, fmt.Errorf("parse manifest: %w", err)
-		}
+	m, err := decodeManifest(body)
+	if err != nil {
+		return nil, fmt.Errorf("parse manifest: %w", err)
 	}
 
-	networks, err := connectNetworks(m, res, cfg, rr, flags.networks, flags.excludes, noDiscovery)
+	discForNetworks := res
+	if noDiscovery {
+		discForNetworks = nil
+	}
+	networks, _, err := sessionNetworks(m, discForNetworks, cfg, rr, flags.networks, flags.excludes)
 	if err != nil {
 		return nil, err
 	}
@@ -186,6 +236,7 @@ func buildPlan(client *sshc.Client, rr *resolvedRemote, cfg *config.Config, ref 
 		Controller:    controller,
 		Protocols:     set.String(),
 		SingleLane:    singleLane,
+		Verbose:       flags.verbose,
 	}, nil
 }
 
@@ -233,55 +284,11 @@ func transportMode(flag string, cfg *config.Config, ref string) transport.Mode {
 	return transport.Resolve(flag, cfg.Remotes[ref].Transport, cfg.Defaults.Transport)
 }
 
-func connectNetworks(m *manifest.Manifest, res *discovery.Result, cfg *config.Config, rr *resolvedRemote, networkFlags, excludeFlags []string, noDiscovery bool) ([]netip.Prefix, error) {
-	// Include the remote manifest and discovery, plus the remote-config and
-	// flag networks; exclude the manifest, config, remote-config, and flag
-	// excludes.
-	includeNetworks := append(append([]string{}, m.Networks...), rr.Config.Networks...)
-	includeNetworks = append(includeNetworks, networkFlags...)
-	manifestNetworks, err := manifest.ParsePrefixes(includeNetworks)
-	if err != nil {
-		return nil, fmt.Errorf("networks: %w", err)
-	}
-	manifestExclude, err := manifest.ParsePrefixes(m.Exclude)
-	if err != nil {
-		return nil, fmt.Errorf("manifest exclude: %w", err)
-	}
-	excludeList := append(append([]string{}, cfg.Exclude...), rr.Config.Exclude...)
-	excludeList = append(excludeList, excludeFlags...)
-	localExclude, err := manifest.ParsePrefixes(excludeList)
-	if err != nil {
-		return nil, fmt.Errorf("exclude: %w", err)
-	}
-
-	var linkRoutes, cloudNets []netip.Prefix
-	if !noDiscovery {
-		if m.LinkRoutesEnabled() {
-			if linkRoutes, err = res.LinkRoutePrefixes(); err != nil {
-				return nil, fmt.Errorf("discovery link routes: %w", err)
-			}
-		}
-		if m.CloudEnabled() {
-			if cloudNets, err = res.CloudNetworkPrefixes(); err != nil {
-				return nil, fmt.Errorf("discovery cloud networks: %w", err)
-			}
-		}
-	}
-
-	return manifest.ComputeNetworks(manifest.Inputs{
-		ManifestNetworks:    manifestNetworks,
-		ManifestExclude:     manifestExclude,
-		DiscoveryLinkRoutes: linkRoutes,
-		DiscoveryCloud:      cloudNets,
-		RemoteAddrs:         rr.Peer.TailscaleIPs,
-		ClientConnected:     clientConnected(),
-		LocalExclude:        localExclude,
-	})
-}
-
 // resolveDNS picks the mode by precedence (flag, remote config, defaults,
 // then the manifest default), and the servers and domains. The servers
 // default to the discovered resolvers, the domains to the manifest domains.
+// A nil res means no discovery ran, so the servers come from the manifest
+// only.
 func resolveDNS(dnsFlag string, cfg *config.Config, ref string, m *manifest.Manifest, res *discovery.Result) (dns.Mode, []string, []string, error) {
 	var domains []string
 	if m.DNS != nil {
@@ -292,7 +299,7 @@ func resolveDNS(dnsFlag string, cfg *config.Config, ref string, m *manifest.Mani
 	var servers []string
 	if m.DNS != nil && len(m.DNS.Servers) > 0 {
 		servers = m.DNS.Servers
-	} else {
+	} else if res != nil {
 		servers = res.Resolvers
 	}
 

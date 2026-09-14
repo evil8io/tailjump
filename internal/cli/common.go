@@ -60,7 +60,7 @@ func knownHostsCacheDir() string {
 }
 
 // localConfigPath is $XDG_CONFIG_HOME/tj/config.yaml, the file tj reads and
-// the tj remote and tj config commands write.
+// the tj alias and tj config commands write.
 func localConfigPath() string {
 	return filepath.Join(platform.New().Paths.ConfigDir(), "config.yaml")
 }
@@ -72,7 +72,7 @@ func loadLocalConfig() (*config.Config, error) {
 }
 
 // saveLocalConfig writes cfg to path. It defaults the schema version to 1,
-// so a config created by the first tj remote or tj config write is valid.
+// so a config created by the first tj alias or tj config write is valid.
 func saveLocalConfig(path string, cfg *config.Config) error {
 	if cfg.Version == 0 {
 		cfg.Version = 1

@@ -46,7 +46,7 @@ Module `github.com/evil8io/tailjump`, Go 1.27, CGO off on every target.
 
 ## Platform interfaces
 
-`internal/platform/platform.go` has one interface per concern. The Linux implementation is in `internal/platform/linux`, the macOS one in `internal/platform/darwin`, and the in-memory one in `internal/platform/fake`. Build tags select the real implementation, and `platform.New()` returns it. A chunk may extend an interface. The fake then follows in the same PR.
+`internal/platform/platform.go` has one interface per concern. The Linux implementation is in `internal/platform/linux`, the macOS one in `internal/platform/darwin`, and the in-memory one in `internal/platform/fake`. Build tags select the real implementation, and `platform.New()` returns it. A chunk may extend an interface. The fake then follows in the same PR. `linux` and `darwin` cannot import this package, because this package already imports them; a method whose interface signature names a type from here, for example `Logs` and `LogOptions`, reaches `linux.Runner` and `darwin.Runner` as plain arguments instead, and `platform_linux.go` and `platform_darwin.go` each wrap the concrete Runner to restore the interface shape.
 
 ```go
 type Device interface {
@@ -83,6 +83,18 @@ type Runner interface {
     Start(plan string) error
     Stop() error
     Active() (bool, error)
+    // Logs writes the session log to w, per opts. It stops when ctx ends and
+    // returns nil, not the process error, because the caller asked for the stop.
+    Logs(ctx context.Context, w io.Writer, opts LogOptions) error
+}
+
+// LogOptions selects the lines Runner.Logs writes: Lines is the last N lines,
+// 0 with a non-zero Since meaning every line since Since; Follow keeps
+// writing new lines until ctx ends; Since zero means no time limit.
+type LogOptions struct {
+    Lines  int
+    Follow bool
+    Since  time.Time
 }
 
 type Paths interface {
@@ -159,21 +171,23 @@ Invariants: the tailnet range is excluded from the session networks in every ver
 
 ### Privilege on Linux
 
-`tj setup` copies the running binary to `/usr/local/libexec/tj/tj` (root, 0755) and writes `/etc/sudoers.d/tj` with `<user> ALL=(root) NOPASSWD: /usr/local/libexec/tj/tj`. `setup` runs `sudo` interactively once, and validates the file with `visudo -c`. It checks `systemd-run`, `resolvectl`, and `/dev/net/tun`.
+`tj setup` copies the running binary to `/usr/local/libexec/tj/tj` (root, 0755) and writes `/etc/sudoers.d/tj` with `<user> ALL=(root) NOPASSWD: /usr/local/libexec/tj/tj`. On Linux it checks `systemd-run` and `/dev/net/tun`, then runs `sudo` interactively once, and validates the file with `visudo -c`. When `session.CheckRootCopy` already passes, `setup` prints `setup is current (<version>)` and returns without the tool checks and without sudo.
 
 The root copy is root-owned, so the NOPASSWD rule does not point at a user-writable file. `tj connect` compares the output of `/usr/local/libexec/tj/tj version` with its own version, and refuses on a mismatch with the message to run `tj setup`.
 
 ### Connect flow
 
-1. The unprivileged `tj connect` resolves the remote, opens SSH, reads the manifest, runs discovery, and computes the session networks. It refuses on an empty set. It refuses when a session is active, unless `--replace`.
+1. The unprivileged `tj connect` resolves the remote, opens SSH, reads the manifest, runs discovery, and computes the session networks. It refuses on an empty set. It refuses when a session to another address is active, unless `--replace`. A session to the address of the plan is the already-up case in "CLI conventions".
 2. It writes the plan as JSON to the stdin of `sudo -n /usr/local/libexec/tj/tj _session start`. When the effective uid is 0, it runs the same code in-process without sudo.
 3. `_session start` writes the plan to `/run/tj/plan.json` (0600) and starts the unit: `systemd-run --unit tj-session --collect --property KillMode=mixed --property TimeoutStopSec=20 --property "ExecStopPost=<root tj> _session cleanup" <root tj> _session run /run/tj/plan.json`. With `--foreground`, it runs `_session run` in-process instead.
 4. `_session run` opens SSH, uploads and starts the helper, opens the mux, selects the transport, opens the extra lanes on the SSH transport, creates the device, adds the routes, applies the DNS mode, writes the state file with status `up`, and waits for a signal, a mux failure on any lane, or a QUIC connection close. On exit it reverts the DNS, removes the routes and the device, closes the QUIC connection, sends `quit` to the helper of every lane, and removes the state file.
-5. `_session start` waits up to 60 s for the state file with status `up` or for the unit to fail, and prints the result.
-6. `tj disconnect` runs `sudo -n /usr/local/libexec/tj/tj _session stop`, which runs `systemctl stop tj-session`.
+5. `tj connect` prints `connecting to <hostname> (<addr>) as <user>` on stderr, right after the remote resolution. `_session start` then waits up to 60 s for the state file with status `up`, or for the unit to fail. It prints nothing on success. `tj connect` reads the state file after that wait and prints one line on stdout: `session to <remote> up: <transport>, dns <mode>, <n> networks, <elapsed>`. The elapsed time runs from the start of the command. With `-v` the root copy follows the session log on stderr during the wait, from the start of the unit. The steps of the unit then print as they happen. Without `-v` the header line and the final line are the whole output of a connect that succeeds. When the unit fails, or when the wait times out, the root copy prints the last 20 lines of this session's log on stderr. The error then ends with `see tj logs for the full log`. With `-v` there is no tail, because the stream already printed those lines. A signal during that wait cancels the connect. `tj connect` sends SIGINT to `sudo` instead of a kill signal, and sudo relays it to the root copy. The root copy stops the unit and waits up to 25 s until the unit is inactive. It then prints `connect cancelled; the session is stopped` and exits 130. sudo 1.9.14 and later run the root copy in a pseudo-terminal, so a Ctrl-C can reach that child alone. `tj connect` then reads the exit code 130 of sudo as the interrupt, and exits 130 itself. A signal after the session came up changes nothing: the session stays up.
+6. `tj disconnect` runs `sudo -n /usr/local/libexec/tj/tj _session stop`, which runs `systemctl stop tj-session`. It reads the remote from the state file before the stop, and prints `session to <remote> ended` on stdout.
 7. `_session cleanup` runs after every stop. It reverts the DNS on `tj0`, restores `/etc/resolv.conf` from the backup, deletes `tj0` when it exists, removes the session rules and flushes the session table, and removes the state and plan files. Every step is safe to repeat.
 
-The plan JSON: `{"remote":…,"addr":…,"user":…,"networks":[…],"dns":{"mode":…,"servers":[…],"domains":[…]},"helper_arch":…,"transport":"auto|quic|ssh","quic_ports":"7443-7452","bandwidth_up":0,"bandwidth_down":0,"protocols":"tcp,udp,icmp","single_lane":false}`. The bandwidths are bytes per second, zero for BBR. An empty `protocols` means all three. `single_lane` keeps the SSH transport on the primary lane, and `tj connect` sets it from `TJ_SSH_LANES`.
+On Linux the session logs to the journal of the unit `tj-session`. On macOS it logs to `RuntimeDir/session.log` (0640), and `Start` opens that file with `O_TRUNC`, so it has the log of the last session only. `tj logs` prints it on both platforms through `Runner.Logs`; an unprivileged caller reaches it the way `tj disconnect` reaches `_session stop`, through `sudo -n <root copy> _session logs`.
+
+The plan JSON: `{"remote":…,"addr":…,"user":…,"networks":[…],"dns":{"mode":…,"servers":[…],"domains":[…]},"helper_arch":…,"transport":"auto|quic|ssh","quic_ports":"7443-7452","bandwidth_up":0,"bandwidth_down":0,"protocols":"tcp,udp,icmp","single_lane":false,"verbose":false}`. The bandwidths are bytes per second, zero for BBR. An empty `protocols` means all three. `single_lane` keeps the SSH transport on the primary lane, and `tj connect` sets it from `TJ_SSH_LANES`. `verbose` sets the log level of the session to debug, and `tj -v connect` sets it, because the unit inherits no flag and no environment.
 
 The state file `/run/tj/session.json` (0644): `{"remote":…,"addr":…,"user":…,"networks":[…],"dns":{…},"started_at":…,"pid":…,"status":"starting|up|stopping","transport":"quic|ssh","quic_port":…,"fallback":…,"protocols":"tcp,udp,icmp","lanes":"tcp,udp,icmp,dns"}`. `lanes` are the SSH connections that opened, in the order tcp, udp, icmp, dns, and it is empty on the QUIC transport. `tj status` reads it without root and prints `Protocols:`.
 
@@ -230,7 +244,9 @@ minus config.exclude and every --exclude
 minus 0.0.0.0/8, 127.0.0.0/8, 169.254.0.0/16, 224.0.0.0/3, ::1/128, fe80::/10, ff00::/8
 ```
 
-The result is the minimal sorted prefix list. `describe` prints the manifest, the discovery result, every exclusion, and the final list.
+The result is the minimal sorted prefix list. `internal/cli`'s `sessionNetworks` gathers these inputs from the manifest, the discovery result, the local config, the resolved remote, and the `--network` and `--exclude` flags. It then calls `ComputeNetworks`. `connect`, `describe`, and `doctor` share it, so they report the same session networks for the same remote. A nil discovery result means discovery did not run, or `--no-discovery` set its networks aside.
+
+`describe` prints the manifest, the discovery result, every exclusion, the final list, the DNS mode, the DNS servers, the DNS domains, and the transport. It resolves the DNS mode and the transport the way `connect` would, with no flag override. A DNS resolution error, for example a split mode without the manifest `dns.domains`, does not fail `describe`. `describe` prints the error text as the DNS mode value. `describe` is the tool that finds this problem.
 
 ### Discovery script output
 
@@ -302,17 +318,45 @@ remotes:
 
 The SSH user defaults to the local username. The precedence is the flag, then `remotes.<name>`, then `defaults`. A remote's host is the base hostname; resolution tolerates a Tailscale collision suffix. Prefer a tag for a gateway that an AMI replacement recreates.
 
-A remote's `networks` and `exclude` feed the session network computation: `networks` add to the routed set alongside the manifest, discovery, and the `--network` flags, and `exclude` drops from it alongside `config.exclude`, the manifest exclude, and the `--exclude` flags. See "Session networks". `tj config` writes the defaults and the global exclude; `tj remote` writes the aliases.
+A remote's `networks` and `exclude` feed the session network computation: `networks` add to the routed set alongside the manifest, discovery, and the `--network` flags, and `exclude` drops from it alongside `config.exclude`, the manifest exclude, and the `--exclude` flags. See "Session networks". `tj config` writes the defaults and the global exclude; `tj alias` writes the aliases.
+
+`tj config set exclude <cidr>[,<cidr>...]` replaces the global exclude list. `tj config unset <key>` clears one key: `defaults.user`, `defaults.dns`, `defaults.transport`, `defaults.protocols`, or `exclude`. An unknown key is a usage error, exit code 2, and the message lists the valid keys.
+
+`tj alias unset <alias> <field>...` clears one or more fields of an alias: `user`, `dns`, `transport`, `protocols`, `networks`, or `exclude`. An alias needs `host`, so `unset` does not clear it. An unknown field, or `host`, is a usage error, exit code 2, and the message lists the valid fields. The `--network` and `--exclude` flags of `tj alias set` replace the whole list. They do not add to it.
+
+`config.Load` decodes the file with unknown fields rejected. It then validates the file:
+
+* `version` is absent or 1.
+* Each DNS, transport, and protocols value, in `defaults` and in every remote, is valid or empty.
+* Each CIDR in `exclude`, in every remote's `networks`, and in every remote's `exclude`, parses.
+* Every remote has a `host`.
+
+The error names the file path and the key, for example `remotes.gw.dns: invalid value "bogus", want none, split, or all`. Every command that loads the config reports a broken file at once, exit code 1, except `tj list`, which turns the error into a warning and continues (S2).
+
+A CLI write of `tj config` or `tj alias` replaces the whole file, so it drops the comments of a file an engineer edited by hand. Edit the file directly to keep the comments. Run `$EDITOR $(tj config path)` to open it. The next command that loads the file validates it.
 
 ### CLI conventions
 
-* Human output through `text/tabwriter`. `--json` on `list`, `describe`, `status`, and `doctor`.
-* Errors are one line on stderr with exit code 1. A usage error exits 2. `connect` exits 3 when a session is active.
+* `tj --help` groups the visible commands: Session commands `connect`, `disconnect`, `status`, `logs`; Inspection commands `list`, `describe`, `doctor`; Configuration commands `alias`, `config`, `setup`. `completion`, `help`, and `version` stay under Additional Commands.
+* Human output through `text/tabwriter`. `--json` on `list`, `describe`, `status`, `doctor`, and `connect --dry-run`.
+* Errors are one line on stderr, `Error: <message>`. The exit code:
+
+| Code | Meaning |
+| ---- | ------- |
+| 0 | Success. `tj status` with no active session also exits 0. `tj connect` to the remote of the active session, without `--replace`, also exits 0. |
+| 1 | Runtime error: an error that the `RunE` of a command returns. `tj doctor` exits 1 when a check fails. |
+| 2 | Usage error: an unknown command, a wrong number of arguments, an unknown flag, or an invalid flag value. |
+| 3 | `tj connect` finds an active session to a different remote and has no `--replace`. |
+| 130 | SIGINT stopped the command. |
 * `log/slog` with a text handler on stderr. `-v` enables debug. The session unit logs to the journal through stderr.
 * `_remote` and `_session` are hidden commands.
-* `tj doctor <remote>` reports: peer online, SSH ok, banner, manifest path or absent, exec dir, helper architecture, discovery ok, session networks non-empty, DNS mode availability, resolved available, sudo rule present, root copy version, the QUIC transport, and the echo socket of the remote: `raw socket`, `ping socket`, or `none`, with the `ping_group_range` value for the last two. It runs the manifest checks from the remote through the helper over a temporary mux, and from the client with a direct dial.
+* `tj logs` prints the session log with `-n/--lines` (default 100, 0 for all) and `-f/--follow`. It works with no active session, and shows the log of the last session, the main use after a failed connect. The hidden `_session logs` adds `--since` (RFC 3339), for the stream and the failure tail of a connect.
+* `tj doctor` runs the client checks: `tj version`, `tailnet`, `root copy`, `systemd-run` and `/dev/net/tun` on Linux, and `systemd-resolved`. `tj doctor <remote>` adds the remote checks: peer, SSH ok, discovery ok, manifest path or absent, exec dir, helper arch, parse manifest, session networks non-empty, session networks, DNS default mode, the QUIC transport, and the echo socket of the remote: `raw socket`, `ping socket`, or `none`, with the `ping_group_range` value for the last two. Each row has a status of `ok`, `fail`, or `info`, and a `fail` row sets the exit code to 1. The manifest `checks` field is not implemented yet.
+* `tj connect` to the address of the active session, without `--replace`, prints `session to <remote> already up (<uptime>); use --replace to restart` on stdout and exits 0. The check compares the address of the plan with the address in the state file, so an active unit without a state file exits 3. `--replace` ends the session and starts a new one.
+* `tj connect --dry-run` runs every step of the connect flow through the plan, prints it, and exits 0. It prints no header line. It does not check for an active session and does not call sudo. The human layout matches `describe`: Remote, User, Transport, QUIC ports, Protocols, DNS mode, DNS servers, DNS domains, Helper arch, Networks. `--dry-run --json` prints the plan JSON, the same bytes `_session start` reads from stdin. `--json` without `--dry-run` is a usage error. The check runs before the remote resolution, so it needs no network access.
 * Timeouts: SSH dial 15 s, discovery exec 20 s, helper handshake 10 s, connect 90 s in total.
 * `tj list --path` sends up to 3 disco pings per remote through the local API, 200 ms apart, within 2 s, and stops at the first direct pong. A ping can time out while the remote moves data at the link rate: spike 9 measured 4 timeouts of 3 s during downloads at 550 Mbit/s with the session fine at the same moments. The flap detector of the session reads the status endpoint every 10 s and sends no ping, so it is unaffected.
+* `tj list --probe` opens SSH to at most 8 peers at a time, and prints them in the tailnet status order regardless of which probe finishes first. It caches no probe result: each run opens SSH again.
 
 ## Testing
 

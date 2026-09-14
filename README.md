@@ -60,11 +60,35 @@ tj setup
 tj list --path
 tj connect <remote> --dns split --protocols tcp,udp,icmp
 tj status
+tj logs
 tj disconnect
 ```
 
-`<remote>` is a hostname, a tag, or an alias from `tj remote`. `tj --help`
-lists every command and alias.
+`<remote>` is a hostname, a tag, or an alias from `tj alias`. `tj --help`
+lists every command in its group. `tj connect --dry-run` prints the plan for
+a remote and starts no session.
+
+`--json` prints machine output on `list`, `describe`, `status`, `doctor`,
+and `connect --dry-run`.
+
+Exit codes:
+
+* `0` is success. A connect to the remote of the active session, without
+  `--replace`, also exits 0.
+* `1` is a runtime error.
+* `2` is a usage error.
+* `3` is an active session to a different remote, without `--replace`.
+* `130` is an interrupt.
+
+`tj` completes remotes, aliases, config keys, and flag values. Install the
+completion script for your shell.
+
+```
+tj completion bash > /etc/bash_completion.d/tj
+tj completion zsh > "${fpath[1]}/_tj"
+tj completion fish > ~/.config/fish/completions/tj.fish
+tj completion powershell > tj.ps1
+```
 
 ## Docs
 

@@ -3,9 +3,11 @@ package cli
 import (
 	"fmt"
 	"io"
+	"time"
 
 	"github.com/spf13/cobra"
 
+	"github.com/evil8io/tailjump/internal/platform"
 	"github.com/evil8io/tailjump/internal/session"
 )
 
@@ -16,15 +18,19 @@ import (
 func newSessionCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:    "_session",
+		Short:  "Run the privileged session subcommands",
 		Hidden: true,
-		// Bare _session is not an operation; it needs a subcommand.
-		RunE: runNotImplemented,
+		Args:   cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			return cmd.Help()
+		},
 	}
 	cmd.AddCommand(
 		newSessionStartCmd(),
 		newSessionRunCmd(),
 		newSessionStopCmd(),
 		newSessionCleanupCmd(),
+		newSessionLogsCmd(),
 	)
 	return cmd
 }
@@ -32,6 +38,7 @@ func newSessionCmd() *cobra.Command {
 func newSessionStartCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:    "start",
+		Short:  "Start the session unit from a plan on stdin",
 		Hidden: true,
 		Args:   cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -43,7 +50,7 @@ func newSessionStartCmd() *cobra.Command {
 			if len(planJSON) == 0 {
 				return fmt.Errorf("read plan from stdin: empty plan")
 			}
-			return session.Start(cmd.Context(), planJSON, foreground)
+			return session.Start(cmd.Context(), cmd.ErrOrStderr(), planJSON, foreground)
 		},
 	}
 	cmd.Flags().Bool("foreground", false, "run the session in-process instead of a transient unit")
@@ -53,8 +60,12 @@ func newSessionStartCmd() *cobra.Command {
 func newSessionRunCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:    "run <plan>",
+		Short:  "Run the session in the foreground",
 		Hidden: true,
-		Args:   cobra.ExactArgs(1),
+		// systemd stops the unit with SIGTERM, and Run then reverts the
+		// session and returns nil. An exit 130 would mark the unit failed.
+		Annotations: map[string]string{signalExitZero: "true"},
+		Args:        cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return session.Run(cmd.Context(), args[0])
 		},
@@ -64,6 +75,7 @@ func newSessionRunCmd() *cobra.Command {
 func newSessionStopCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:    "stop",
+		Short:  "Stop the session unit",
 		Hidden: true,
 		Args:   cobra.NoArgs,
 		RunE: func(_ *cobra.Command, _ []string) error {
@@ -75,10 +87,42 @@ func newSessionStopCmd() *cobra.Command {
 func newSessionCleanupCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:    "cleanup",
+		Short:  "Clean up the session state after a stop",
 		Hidden: true,
 		Args:   cobra.NoArgs,
 		RunE: func(_ *cobra.Command, _ []string) error {
 			return session.Cleanup()
 		},
 	}
+}
+
+func newSessionLogsCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:    "logs",
+		Short:  "Print the session log as root",
+		Hidden: true,
+		Args:   cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			lines, _ := cmd.Flags().GetInt("lines")
+			follow, _ := cmd.Flags().GetBool("follow")
+			sinceFlag, _ := cmd.Flags().GetString("since")
+			var since time.Time
+			if sinceFlag != "" {
+				t, err := time.Parse(time.RFC3339, sinceFlag)
+				if err != nil {
+					return fmt.Errorf("invalid --since %q: %w", sinceFlag, err)
+				}
+				since = t
+			}
+			return platform.New().Runner.Logs(cmd.Context(), cmd.OutOrStdout(), platform.LogOptions{
+				Lines:  lines,
+				Follow: follow,
+				Since:  since,
+			})
+		},
+	}
+	cmd.Flags().IntP("lines", "n", 100, "the number of lines to print, 0 for all")
+	cmd.Flags().BoolP("follow", "f", false, "keep printing new lines until interrupted")
+	cmd.Flags().String("since", "", "print lines since this RFC 3339 time")
+	return cmd
 }
