@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.7.0](https://github.com/evil8io/tailjump/compare/v1.6.0...v1.7.0) (2026-09-14)
+
+
+### Features
+
+* **session:** reconnect the session after a loss ([#34](https://github.com/evil8io/tailjump/issues/34)) ([703d58e](https://github.com/evil8io/tailjump/commit/703d58e5780fe3380d5213ed0e85e96c5ba6e38a))
+
 ## [1.6.0](https://github.com/evil8io/tailjump/compare/v1.5.0...v1.6.0) (2026-09-14)
 
 
