@@ -186,8 +186,8 @@ func completeProtocols(_ *cobra.Command, _ []string, toComplete string) ([]strin
 // registerRemoteFlagCompletions registers the completions shared by connect
 // and the tj alias commands that take the remote-config flags: --dns,
 // --transport, and --protocols get the S4 type values; --user, --network,
-// and --exclude get no file completion, because their values are not
-// enumerable.
+// --exclude, and --reconnect-for get no file completion, because their
+// values are not enumerable.
 func registerRemoteFlagCompletions(cmd *cobra.Command) {
 	_ = cmd.RegisterFlagCompletionFunc("dns", completeDNSMode)
 	_ = cmd.RegisterFlagCompletionFunc("transport", completeTransportMode)
@@ -195,6 +195,7 @@ func registerRemoteFlagCompletions(cmd *cobra.Command) {
 	_ = cmd.RegisterFlagCompletionFunc("user", cobra.NoFileCompletions)
 	_ = cmd.RegisterFlagCompletionFunc("network", cobra.NoFileCompletions)
 	_ = cmd.RegisterFlagCompletionFunc("exclude", cobra.NoFileCompletions)
+	_ = cmd.RegisterFlagCompletionFunc("reconnect-for", cobra.NoFileCompletions)
 }
 
 // filterPrefix returns the items that start with prefix. An empty prefix

@@ -1,6 +1,8 @@
 package cli
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -46,6 +48,7 @@ A connect to the remote of the active session prints already up and exits 0, unl
 	cmd.Flags().Var(&dnsModeValue{}, "dns", "the DNS mode")
 	cmd.Flags().Var(&transportModeValue{}, "transport", "the data plane transport")
 	cmd.Flags().Var(&protocolSetValue{}, "protocols", "the protocols to forward")
+	cmd.Flags().Var(&reconnectForValue{}, "reconnect-for", "the reconnect window after a session loss")
 	cmd.Flags().StringArray("network", nil, "an extra CIDR to route, on top of the manifest and discovery, repeatable")
 	cmd.Flags().StringArray("exclude", nil, "a CIDR to exclude from the session, repeatable")
 	cmd.Flags().Bool("no-discovery", false, "skip discovery")
@@ -63,6 +66,7 @@ func runConnect(cmd *cobra.Command, args []string) error {
 	dnsFlag := flagString(cmd, "dns")
 	transportFlag := flagString(cmd, "transport")
 	protocolsFlag := flagString(cmd, "protocols")
+	reconnectForFlag := flagString(cmd, "reconnect-for")
 	networkFlags, _ := cmd.Flags().GetStringArray("network")
 	excludeFlags, _ := cmd.Flags().GetStringArray("exclude")
 	noDiscovery, _ := cmd.Flags().GetBool("no-discovery")
@@ -93,12 +97,13 @@ func runConnect(cmd *cobra.Command, args []string) error {
 	defer func() { _ = client.Close() }()
 
 	plan, err := buildPlan(client, rr, cfg, args[0], planFlags{
-		dns:       dnsFlag,
-		transport: transportFlag,
-		protocols: protocolsFlag,
-		networks:  networkFlags,
-		excludes:  excludeFlags,
-		verbose:   verbose,
+		dns:          dnsFlag,
+		transport:    transportFlag,
+		protocols:    protocolsFlag,
+		reconnectFor: reconnectForFlag,
+		networks:     networkFlags,
+		excludes:     excludeFlags,
+		verbose:      verbose,
 	}, noDiscovery)
 	if err != nil {
 		return err
@@ -135,6 +140,7 @@ func printPlan(cmd *cobra.Command, plan *session.Plan, asJSON bool) error {
 	_, _ = fmt.Fprintf(w, "Transport:\t%s\n", plan.Transport)
 	_, _ = fmt.Fprintf(w, "QUIC ports:\t%s\n", plan.QUICPorts)
 	_, _ = fmt.Fprintf(w, "Protocols:\t%s\n", plan.Protocols)
+	_, _ = fmt.Fprintf(w, "Reconnect for:\t%s\n", (time.Duration(plan.ReconnectFor) * time.Second).String())
 	_, _ = fmt.Fprintf(w, "DNS mode:\t%s\n", plan.DNS.Mode)
 	_, _ = fmt.Fprintf(w, "DNS servers:\t%s\n", joinOrNone(plan.DNS.Servers))
 	_, _ = fmt.Fprintf(w, "DNS domains:\t%s\n", joinOrNone(plan.DNS.Domains))
@@ -148,12 +154,13 @@ func printPlan(cmd *cobra.Command, plan *session.Plan, asJSON bool) error {
 
 // planFlags are the connect flags that shape the plan.
 type planFlags struct {
-	dns       string
-	transport string
-	protocols string
-	networks  []string
-	excludes  []string
-	verbose   bool
+	dns          string
+	transport    string
+	protocols    string
+	reconnectFor string
+	networks     []string
+	excludes     []string
+	verbose      bool
 }
 
 // buildPlan runs discovery, computes the session networks, resolves the DNS
@@ -220,23 +227,31 @@ func buildPlan(client *sshc.Client, rr *resolvedRemote, cfg *config.Config, ref 
 	if err != nil {
 		return nil, err
 	}
+	reconnect, err := reconnectFor(flags.reconnectFor, cfg, ref)
+	if err != nil {
+		return nil, fmt.Errorf("invalid reconnect_for: %w", err)
+	}
+	sum := sha256.Sum256(body)
 	slog.Debug("session networks", "count", len(networks), "networks", prefixStrings(networks), "dns", mode, "transport", tmode, "protocols", set)
 
 	return &session.Plan{
-		Remote:        rr.Peer.HostName,
-		Addr:          rr.Addr.String(),
-		User:          rr.User,
-		Networks:      prefixStrings(networks),
-		DNS:           session.PlanDNS{Mode: string(mode), Servers: servers, Domains: domains},
-		HelperArch:    goarch,
-		Transport:     string(tmode),
-		QUICPorts:     ports.String(),
-		BandwidthUp:   up,
-		BandwidthDown: down,
-		Controller:    controller,
-		Protocols:     set.String(),
-		SingleLane:    singleLane,
-		Verbose:       flags.verbose,
+		Remote:         rr.Peer.HostName,
+		Ref:            rr.Ref,
+		Addr:           rr.Addr.String(),
+		User:           rr.User,
+		Networks:       prefixStrings(networks),
+		DNS:            session.PlanDNS{Mode: string(mode), Servers: servers, Domains: domains},
+		HelperArch:     goarch,
+		ManifestSHA256: hex.EncodeToString(sum[:]),
+		Transport:      string(tmode),
+		QUICPorts:      ports.String(),
+		BandwidthUp:    up,
+		BandwidthDown:  down,
+		Controller:     controller,
+		Protocols:      set.String(),
+		SingleLane:     singleLane,
+		Verbose:        flags.verbose,
+		ReconnectFor:   int(reconnect / time.Second),
 	}, nil
 }
 
@@ -282,6 +297,24 @@ func singleLaneKnob() (bool, error) {
 // config, then the defaults, then auto.
 func transportMode(flag string, cfg *config.Config, ref string) transport.Mode {
 	return transport.Resolve(flag, cfg.Remotes[ref].Transport, cfg.Defaults.Transport)
+}
+
+// reconnectFor picks the reconnect window by precedence: the flag, then
+// remotes.<ref>.reconnect_for, then defaults.reconnect_for, then 10 minutes.
+// The flag and the config values are pre-validated Go durations, so only an
+// empty value falls through to the next source.
+func reconnectFor(flag string, cfg *config.Config, ref string) (time.Duration, error) {
+	value := flag
+	if value == "" {
+		value = cfg.Remotes[ref].ReconnectFor
+	}
+	if value == "" {
+		value = cfg.Defaults.ReconnectFor
+	}
+	if value == "" {
+		return 10 * time.Minute, nil
+	}
+	return time.ParseDuration(value)
 }
 
 // resolveDNS picks the mode by precedence (flag, remote config, defaults,

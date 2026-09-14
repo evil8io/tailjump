@@ -2,6 +2,7 @@ package cli
 
 import (
 	"errors"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -75,6 +76,25 @@ func (v *protocolSetValue) Type() string { return "tcp,udp,icmp" }
 func (v *protocolSetValue) Values() []string {
 	return []string{protocols.TCP, protocols.UDP, protocols.ICMP}
 }
+
+// reconnectForValue is the pflag.Value for --reconnect-for and for
+// defaults.reconnect_for and remotes.<name>.reconnect_for in tj config set
+// and tj alias set.
+type reconnectForValue struct {
+	value string
+}
+
+func (v *reconnectForValue) String() string { return v.value }
+
+func (v *reconnectForValue) Set(s string) error {
+	if d, err := time.ParseDuration(s); err != nil || d < 0 {
+		return errors.New("want a Go duration such as 10m, or 0")
+	}
+	v.value = s
+	return nil
+}
+
+func (v *reconnectForValue) Type() string { return "duration" }
 
 // flagString returns the current value of a flag that Var registered, for
 // example the enum types above, whose Value.String carries it. GetString

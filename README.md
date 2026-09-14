@@ -80,6 +80,9 @@ Exit codes:
 * `3` is an active session to a different remote, without `--replace`.
 * `130` is an interrupt.
 
+A session reconnects after a loss for `reconnect_for`, default 10 minutes.
+`--reconnect-for 0` turns the reconnect off. `tj status` shows the reconnect.
+
 `tj` completes remotes, aliases, config keys, and flag values. Install the
 completion script for your shell.
 
@@ -109,4 +112,6 @@ task e2e
 ```
 
 `task e2e` runs the podman rig against the gateway in `test/e2e/target.env`.
+`test/e2e/reconnect.sh` runs in the same rig and checks that a session
+reconnects after a loss.
 `tj connect` never runs on the development machine.

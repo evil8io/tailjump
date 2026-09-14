@@ -2,6 +2,7 @@ package mux
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"io"
 	"net"
@@ -164,6 +165,35 @@ func TestLoopbackControlInfo(t *testing.T) {
 	client := newLoopback(t, &Server{Info: info})
 	if got := client.Info(); got != info {
 		t.Fatalf("Info() = %+v, want %+v", got, info)
+	}
+}
+
+func TestClientPing(t *testing.T) {
+	c1, c2 := net.Pipe()
+	go func() { _ = (&Server{}).Serve(c2) }()
+	client, err := NewClient(c1)
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	t.Cleanup(func() { _ = client.Close() })
+
+	if err := client.Ping(context.Background()); err != nil {
+		t.Fatalf("Ping on an open session: %v", err)
+	}
+
+	if err := c2.Close(); err != nil {
+		t.Fatalf("close the peer: %v", err)
+	}
+
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		if err := client.Ping(context.Background()); err != nil {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("Ping still succeeds after the peer closed")
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 }
 

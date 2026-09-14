@@ -3,9 +3,11 @@ package cli
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/spf13/cobra"
 
+	"github.com/evil8io/tailjump/internal/config"
 	"github.com/evil8io/tailjump/internal/dns"
 	"github.com/evil8io/tailjump/internal/protocols"
 )
@@ -62,6 +64,41 @@ func TestCheckDNSProtocols(t *testing.T) {
 		if err != nil && !strings.Contains(err.Error(), "udp") {
 			t.Fatalf("error %q does not name udp", err)
 		}
+	}
+}
+
+// TestReconnectFor locks in the precedence: the flag, then
+// remotes.<ref>.reconnect_for, then defaults.reconnect_for, then 10 minutes.
+func TestReconnectFor(t *testing.T) {
+	cfg := &config.Config{
+		Defaults: config.Defaults{ReconnectFor: "5m"},
+		Remotes: map[string]config.RemoteConfig{
+			"gw": {Host: "gw.example", ReconnectFor: "2m"},
+		},
+	}
+	cases := []struct {
+		name string
+		cfg  *config.Config
+		flag string
+		ref  string
+		want time.Duration
+	}{
+		{"flag wins over remote and defaults", cfg, "1m", "gw", time.Minute},
+		{"flag off wins even when remote and defaults are set", cfg, "0", "gw", 0},
+		{"remote wins over defaults", cfg, "", "gw", 2 * time.Minute},
+		{"defaults win with no matching remote", cfg, "", "other", 5 * time.Minute},
+		{"10 minutes with nothing set", &config.Config{}, "", "gw", 10 * time.Minute},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got, err := reconnectFor(c.flag, c.cfg, c.ref)
+			if err != nil {
+				t.Fatalf("reconnectFor(%q, ref=%q): %v", c.flag, c.ref, err)
+			}
+			if got != c.want {
+				t.Fatalf("reconnectFor(%q, ref=%q) = %s, want %s", c.flag, c.ref, got, c.want)
+			}
+		})
 	}
 }
 

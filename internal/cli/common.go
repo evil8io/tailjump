@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"log/slog"
@@ -15,24 +14,6 @@ import (
 	"github.com/evil8io/tailjump/internal/sshc"
 	"github.com/evil8io/tailjump/internal/tailnet"
 )
-
-// manifestOnlyScript reads the manifest without running full discovery, for
-// describe --no-discovery. It mirrors the manifest lookup in
-// internal/discovery/discover.sh: $XDG_CONFIG_HOME/tj/manifest.yaml (or
-// $HOME/.config when that is unset), then /etc/tj/manifest.yaml. The first
-// line of its output is the path that matched, empty when neither did; the
-// rest is the raw manifest file.
-const manifestOnlyScript = `set -eu
-config_home="${XDG_CONFIG_HOME:-${HOME:-}/.config}"
-for candidate in "$config_home/tj/manifest.yaml" /etc/tj/manifest.yaml; do
-	if [ -r "$candidate" ]; then
-		printf '%s\n' "$candidate"
-		cat "$candidate"
-		exit 0
-	fi
-done
-printf '\n'
-`
 
 // reserved lists the ranges a session never routes, on top of the manifest
 // excludes and the client's own subnets. It mirrors internal/manifest's
@@ -111,12 +92,15 @@ func sshUser(flagUser, remoteUser string, cfg *config.Config) string {
 
 // resolvedRemote is one online peer resolved from a CLI argument, with the
 // IPv4 tailnet address the SSH client dials. Config is the matched config
-// entry, the zero value when ref is a bare hostname or tag.
+// entry, the zero value when ref is a bare hostname or tag. Ref is the host
+// resolveAlias returned, before the online-peer match, so a reconnect can
+// resolve it again.
 type resolvedRemote struct {
 	Peer   tailnet.Peer
 	Addr   netip.Addr
 	User   string
 	Config config.RemoteConfig
+	Ref    string
 }
 
 // resolveRemote expands a config alias, fetches the tailnet status, and
@@ -144,6 +128,7 @@ func resolveRemote(ctx context.Context, tn *tailnet.Client, cfg *config.Config, 
 		Addr:   addr,
 		User:   dialUser,
 		Config: cfg.Remotes[ref],
+		Ref:    host,
 	}, nil
 }
 
@@ -175,25 +160,6 @@ func runDiscovery(client *sshc.Client) (*discovery.Result, error) {
 		"resolvers", len(res.Resolvers),
 	)
 	return res, nil
-}
-
-// fetchManifestOnly runs manifestOnlyScript over client and splits its
-// output into the manifest path (empty when the remote has none) and the
-// raw manifest bytes.
-func fetchManifestOnly(client *sshc.Client) (path string, content []byte, err error) {
-	out, err := client.Run("sh", []byte(manifestOnlyScript))
-	if err != nil {
-		return "", nil, fmt.Errorf("read manifest: %w", err)
-	}
-	idx := bytes.IndexByte(out, '\n')
-	if idx < 0 {
-		return "", nil, fmt.Errorf("read manifest: unexpected output %q", out)
-	}
-	path = string(out[:idx])
-	if path == "" {
-		return "", nil, nil
-	}
-	return path, out[idx+1:], nil
 }
 
 func prefixStrings(prefixes []netip.Prefix) []string {

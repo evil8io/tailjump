@@ -11,7 +11,7 @@ import (
 
 // decodeManifest parses body into a manifest, or returns the empty manifest
 // when body is empty. connect, describe, and doctor each get body from
-// discovery.Result.DecodedManifest or from fetchManifestOnly. They then
+// discovery.Result.DecodedManifest or from discovery.FetchManifest. They then
 // share this decode step.
 func decodeManifest(body []byte) (*manifest.Manifest, error) {
 	if len(body) == 0 {

@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"time"
 
 	"gopkg.in/yaml.v3"
 
@@ -28,21 +29,23 @@ type Config struct {
 
 // Defaults holds the fallback values for a connect.
 type Defaults struct {
-	User      string `yaml:"user,omitempty"`
-	DNS       string `yaml:"dns,omitempty"`
-	Transport string `yaml:"transport,omitempty"`
-	Protocols string `yaml:"protocols,omitempty"`
+	User         string `yaml:"user,omitempty"`
+	DNS          string `yaml:"dns,omitempty"`
+	Transport    string `yaml:"transport,omitempty"`
+	Protocols    string `yaml:"protocols,omitempty"`
+	ReconnectFor string `yaml:"reconnect_for,omitempty"`
 }
 
 // RemoteConfig is one entry under remotes.
 type RemoteConfig struct {
-	Host      string   `yaml:"host,omitempty" json:"host,omitempty"`
-	User      string   `yaml:"user,omitempty" json:"user,omitempty"`
-	DNS       string   `yaml:"dns,omitempty" json:"dns,omitempty"`
-	Transport string   `yaml:"transport,omitempty" json:"transport,omitempty"`
-	Protocols string   `yaml:"protocols,omitempty" json:"protocols,omitempty"`
-	Networks  []string `yaml:"networks,omitempty" json:"networks,omitempty"`
-	Exclude   []string `yaml:"exclude,omitempty" json:"exclude,omitempty"`
+	Host         string   `yaml:"host,omitempty" json:"host,omitempty"`
+	User         string   `yaml:"user,omitempty" json:"user,omitempty"`
+	DNS          string   `yaml:"dns,omitempty" json:"dns,omitempty"`
+	Transport    string   `yaml:"transport,omitempty" json:"transport,omitempty"`
+	Protocols    string   `yaml:"protocols,omitempty" json:"protocols,omitempty"`
+	Networks     []string `yaml:"networks,omitempty" json:"networks,omitempty"`
+	Exclude      []string `yaml:"exclude,omitempty" json:"exclude,omitempty"`
+	ReconnectFor string   `yaml:"reconnect_for,omitempty" json:"reconnect_for,omitempty"`
 }
 
 // Load reads the config at path, decodes it with unknown fields rejected,
@@ -79,6 +82,9 @@ func validate(c *Config) error {
 	if err := validateValues("defaults", c.Defaults.DNS, c.Defaults.Transport, c.Defaults.Protocols); err != nil {
 		return err
 	}
+	if err := validateReconnectFor("defaults", c.Defaults.ReconnectFor); err != nil {
+		return err
+	}
 	if _, err := manifest.ParsePrefixes(c.Exclude); err != nil {
 		return fmt.Errorf("exclude: %w", err)
 	}
@@ -94,6 +100,9 @@ func validate(c *Config) error {
 			return fmt.Errorf("remotes.%s: host is required", name)
 		}
 		if err := validateValues("remotes."+name, rc.DNS, rc.Transport, rc.Protocols); err != nil {
+			return err
+		}
+		if err := validateReconnectFor("remotes."+name, rc.ReconnectFor); err != nil {
 			return err
 		}
 		if _, err := manifest.ParsePrefixes(rc.Networks); err != nil {
@@ -117,6 +126,18 @@ func validateValues(prefix, dnsValue, transportValue, protocolsValue string) err
 	}
 	if protocolsValue != "" && !protocols.Valid(protocolsValue) {
 		return fmt.Errorf("%s.protocols: invalid value %q, want a comma-separated list of tcp, udp, and icmp, each at most once", prefix, protocolsValue)
+	}
+	return nil
+}
+
+// validateReconnectFor checks a reconnect_for value of one defaults or
+// remote block, under prefix. An empty value is not set and is valid.
+func validateReconnectFor(prefix, value string) error {
+	if value == "" {
+		return nil
+	}
+	if d, err := time.ParseDuration(value); err != nil || d < 0 {
+		return fmt.Errorf("%s.reconnect_for: invalid value %q, want a Go duration such as 10m, or 0", prefix, value)
 	}
 	return nil
 }

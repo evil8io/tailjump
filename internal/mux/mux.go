@@ -51,8 +51,8 @@ const (
 	handshakeTimeout = 10 * time.Second
 	dialTimeout      = 10 * time.Second
 
-	keepAliveInterval = 10 * time.Second
-	connWriteTimeout  = 30 * time.Second
+	keepAliveInterval = 5 * time.Second
+	connWriteTimeout  = 20 * time.Second
 	maxStreamWindow   = 4 << 20
 
 	udpIdle    = 60 * time.Second
@@ -65,8 +65,8 @@ const (
 	quicALPN             = "tj/4"
 	quicHandshakeTimeout = 5 * time.Second
 	quicReplyTimeout     = 15 * time.Second
-	quicIdleTimeout      = 30 * time.Second
-	quicKeepAlive        = 10 * time.Second
+	quicIdleTimeout      = 15 * time.Second
+	quicKeepAlive        = 5 * time.Second
 	quicPacketSize       = 1232
 	quicMaxStreams       = 1 << 16
 	quicOpenTimeout      = 10 * time.Second

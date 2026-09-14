@@ -17,6 +17,22 @@ import (
 //go:embed discover.sh
 var script string
 
+// manifestOnlyScript reads the manifest without running full discovery, for
+// describe --no-discovery and for a reconnect. It mirrors the manifest
+// lookup in discover.sh: $XDG_CONFIG_HOME/tj/manifest.yaml (or $HOME/.config
+// when that is unset), then /etc/tj/manifest.yaml.
+const manifestOnlyScript = `set -eu
+config_home="${XDG_CONFIG_HOME:-${HOME:-}/.config}"
+for candidate in "$config_home/tj/manifest.yaml" /etc/tj/manifest.yaml; do
+	if [ -r "$candidate" ]; then
+		printf '%s\n' "$candidate"
+		cat "$candidate"
+		exit 0
+	fi
+done
+printf '\n'
+`
+
 // Cloud is the network CIDRs a cloud metadata service reports.
 type Cloud struct {
 	Provider string   `json:"provider"`
@@ -114,6 +130,27 @@ func (r Result) DecodedManifest() ([]byte, error) {
 		return nil, nil
 	}
 	return base64.StdEncoding.DecodeString(r.Manifest)
+}
+
+// FetchManifest runs manifestOnlyScript through run, the runner shape Run
+// takes, and splits its output into the manifest path (empty when the
+// remote has none) and the raw manifest bytes. internal/session uses it to
+// read the manifest again on a reconnect, because internal/session cannot
+// import internal/cli.
+func FetchManifest(run func(script string) ([]byte, error)) (path string, content []byte, err error) {
+	out, err := run(manifestOnlyScript)
+	if err != nil {
+		return "", nil, fmt.Errorf("read manifest: %w", err)
+	}
+	idx := bytes.IndexByte(out, '\n')
+	if idx < 0 {
+		return "", nil, fmt.Errorf("read manifest: unexpected output %q", out)
+	}
+	path = string(out[:idx])
+	if path == "" {
+		return "", nil, nil
+	}
+	return path, out[idx+1:], nil
 }
 
 // LinkRoutePrefixes parses LinkRoutes into netip.Prefix values. validate

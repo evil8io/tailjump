@@ -51,7 +51,7 @@ func Connect(ctx context.Context, out, errw io.Writer, plan *Plan, replace, fore
 			if st == nil {
 				return ae
 			}
-			_, err := fmt.Fprintf(out, "session to %s already up (%s); use --replace to restart\n", st.Remote, st.Uptime())
+			_, err := fmt.Fprintln(out, upLine(st))
 			return err
 		}
 		if err := stopActive(ctx, out, errw, plat); err != nil {
@@ -76,15 +76,36 @@ func Connect(ctx context.Context, out, errw io.Writer, plan *Plan, replace, fore
 	return nil
 }
 
-// alreadyUp returns the state of the active session when its address is the
-// address of the plan. A missing state file returns nil, because the session
-// the unit runs is then unknown.
+// alreadyUp returns the state of the active session when it is the session
+// the plan asks for: the address of the plan, or the reference of the plan
+// while the session reconnects, because a move leaves the old address in the
+// state until an attempt resolves the new one. A missing state file returns
+// nil, because the session the unit runs is then unknown.
 func alreadyUp(plat platform.Platform, plan *Plan) *State {
 	st, err := ReadState(StatePath(plat.Paths.RuntimeDir()))
-	if err != nil || st.Addr != plan.Addr {
+	if err != nil {
 		return nil
 	}
-	return st
+	if st.Addr == plan.Addr {
+		return st
+	}
+	if st.Status == StatusReconnecting && st.Ref != "" && st.Ref == plan.Ref {
+		return st
+	}
+	return nil
+}
+
+// upLine is the line tj connect prints for a session that is already the
+// session the caller asks for.
+func upLine(st *State) string {
+	if st.Status == StatusReconnecting {
+		attempts := 0
+		if st.Reconnect != nil {
+			attempts = st.Reconnect.Attempts
+		}
+		return fmt.Sprintf("session to %s is reconnecting (attempt %d); use --replace to restart", st.Remote, attempts)
+	}
+	return fmt.Sprintf("session to %s already up (%s); use --replace to restart", st.Remote, st.Uptime())
 }
 
 // printUp prints the final line of a connect from the state the session

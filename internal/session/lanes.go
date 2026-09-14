@@ -171,6 +171,22 @@ func (ls *laneSet) stop() {
 	})
 }
 
+// close closes every extra lane without the quit verb. A loss means the peer
+// is gone, and a control write would then wait for the yamux write timeout
+// on every lane. The lane's helper exits when its SSH connection closes.
+// The SSH connection closes before the mux, for the reason in closeTransport.
+func (ls *laneSet) close() {
+	if ls == nil {
+		return
+	}
+	ls.stopOnce.Do(func() {
+		for _, l := range ls.extra {
+			_ = l.ssh.Close()
+			_ = l.mux.Close()
+		}
+	})
+}
+
 // laneDialer routes a flow to the lane of its protocol, and a flow to a
 // session DNS server on port 53 to the dns lane. A protocol whose lane did
 // not open, and every flow when there are no extra lanes, takes the primary

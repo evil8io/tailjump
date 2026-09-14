@@ -20,6 +20,7 @@ import (
 	"github.com/evil8io/tailjump/internal/helper/embed"
 	"github.com/evil8io/tailjump/internal/mux"
 	"github.com/evil8io/tailjump/internal/platform"
+	"github.com/evil8io/tailjump/internal/protocols"
 	"github.com/evil8io/tailjump/internal/sshc"
 )
 
@@ -156,10 +157,70 @@ func awaitUp(ctx context.Context, plat platform.Platform) error {
 	}
 }
 
+// runner is one session. It holds the parts that live for the whole
+// session, the device, the routes, and the data plane, and the parts of the
+// current transport, which a reconnect rebuilds.
+type runner struct {
+	plat      platform.Platform
+	plan      *Plan
+	set       protocols.Set
+	statePath string
+	state     *State
+	dialer    *switchDialer
+
+	// addr and hostname are the remote now; a reconnect resolves them again.
+	addr     netip.Addr
+	hostname string
+
+	// The parts that survive a loss.
+	device string
+	routes []netip.Prefix
+	dp     *dataplane.DataPlane
+
+	// The parts of the current transport, and the channels that report its
+	// end.
+	sshClient  *sshc.Client
+	muxClient  *mux.Client
+	quicClient *mux.QUICClient
+	lanes      *laneSet
+	muxWait    <-chan struct{}
+	quicWait   <-chan struct{}
+	laneClosed <-chan string
+
+	// The watches of the current transport. resumeLoss carries the loss the
+	// resume detector finds.
+	stopWatch  func()
+	stopResume func()
+	resumeLoss chan string
+
+	// lostAt is the start of the reconnect window.
+	lostAt time.Time
+}
+
+// lossEvent names what ended the transport. reason is the text of the
+// session lost line; lane is the lane whose mux closed, empty for every
+// other loss.
+type lossEvent struct {
+	reason string
+	lane   string
+}
+
+// logEnded writes the line of a session that ends on a loss, the behaviour
+// of a plan without a reconnect window.
+func (e lossEvent) logEnded() {
+	if e.lane != "" {
+		slog.Warn("session ended: lane mux closed", "lane", e.lane)
+		return
+	}
+	slog.Warn("session ended: " + e.reason)
+}
+
 // Run is the session itself: it opens SSH, starts the helper, opens the mux,
 // creates the device, adds the routes, applies the DNS mode, writes the state
-// file with status up, and waits for a signal or a mux failure. On exit it
-// reverts every change. Run runs as root inside the transient unit.
+// file with status up, and waits for a signal or a loss. With a reconnect
+// window it rebuilds the transport after a loss and keeps the device, the
+// routes, and the data plane. On exit it reverts every change. Run runs as
+// root inside the transient unit.
 func Run(ctx context.Context, planPath string) (err error) {
 	// The transient unit's ExecStopPost runs Cleanup on any exit, including a
 	// panic, but a recovered panic also gives a clean log line instead of a
@@ -172,7 +233,6 @@ func Run(ctx context.Context, planPath string) (err error) {
 	}()
 
 	plat := platform.New()
-	statePath := StatePath(plat.Paths.RuntimeDir())
 
 	plan, err := ReadPlan(planPath)
 	if err != nil {
@@ -193,132 +253,295 @@ func Run(ctx context.Context, planPath string) (err error) {
 	ctx, stop := signal.NotifyContext(ctx, syscall.SIGTERM, syscall.SIGINT)
 	defer stop()
 
-	started := time.Now()
-	state := &State{
-		Remote:    plan.Remote,
-		Addr:      plan.Addr,
-		User:      plan.User,
-		Networks:  plan.Networks,
-		DNS:       plan.DNS,
-		StartedAt: started.UTC().Format(time.RFC3339),
-		PID:       os.Getpid(),
-		Status:    StatusStarting,
-		Protocols: set.String(),
-	}
-	if err := writeState(statePath, state); err != nil {
+	r := newRunner(plat, plan, addr, set)
+	if err := writeState(r.statePath, r.state); err != nil {
 		return err
 	}
-	defer func() { _ = os.Remove(statePath) }()
+	defer func() { _ = os.Remove(r.statePath) }()
 
 	// A stale device from a prior crash would block the create.
 	_ = plat.Device.Delete(deviceName)
 
-	sshClient, err := sshc.Dial(ctx, addr, plan.Remote, plan.User, plat.Paths.CacheDir())
-	if err != nil {
-		return fmt.Errorf("ssh dial %s: %w", plan.Remote, err)
+	// The transport comes up before the device exists, so a plan that
+	// demands QUIC fails before the session changes anything on the host.
+	if err := r.transport(ctx); err != nil {
+		return err
 	}
-	defer func() { _ = sshClient.Close() }()
+	defer r.dropTransport()
 
-	muxClient, helperPath, err := startHelper(sshClient, plan.HelperArch)
+	if err := r.setup(ctx); err != nil {
+		return err
+	}
+
+	r.markUp()
+	slog.Info("session up", "remote", plan.Remote, "networks", len(plan.Networks), "dns", plan.DNS.Mode, "transport", r.state.Transport, "protocols", r.state.Protocols)
+	r.startWatches(ctx)
+
+	err = r.loop(ctx)
+	r.stopSession()
 	if err != nil {
 		return err
 	}
-	defer func() { _ = muxClient.Close() }()
+	slog.Info("session down", "remote", plan.Remote)
+	return nil
+}
+
+func newRunner(plat platform.Platform, plan *Plan, addr netip.Addr, set protocols.Set) *runner {
+	return &runner{
+		plat:      plat,
+		plan:      plan,
+		set:       set,
+		statePath: StatePath(plat.Paths.RuntimeDir()),
+		state: &State{
+			Remote:    plan.Remote,
+			Ref:       plan.Ref,
+			Addr:      plan.Addr,
+			User:      plan.User,
+			Networks:  plan.Networks,
+			DNS:       plan.DNS,
+			StartedAt: time.Now().UTC().Format(time.RFC3339),
+			PID:       os.Getpid(),
+			Status:    StatusStarting,
+			Protocols: set.String(),
+		},
+		dialer:     &switchDialer{},
+		addr:       addr,
+		hostname:   plan.Remote,
+		stopWatch:  func() {},
+		stopResume: func() {},
+	}
+}
+
+// transport opens one transport to the remote: the SSH connection, the
+// helper, the QUIC connection or the lanes, and the dialer of the data
+// plane. It runs once per connect attempt, and it leaves nothing open when
+// it fails.
+func (r *runner) transport(ctx context.Context) error {
+	// The dial keeps the hostname of the plan as its known_hosts key, the
+	// key every lane of the attempt uses too.
+	client, err := sshc.Dial(ctx, r.addr, r.plan.Remote, r.plan.User, r.plat.Paths.CacheDir())
+	if err != nil {
+		return fmt.Errorf("ssh dial %s: %w", r.plan.Remote, err)
+	}
+	if err := r.guardManifest(client); err != nil {
+		_ = client.Close()
+		return err
+	}
+
+	muxClient, helperPath, err := startHelper(client, r.plan.HelperArch)
+	if err != nil {
+		_ = client.Close()
+		return err
+	}
 	slog.Debug("mux up", "helper", muxClient.Info().Hostname, "version", muxClient.Info().Version)
 
-	var dialer mux.Dialer
-	var quicWait <-chan struct{}
-	var lanes *laneSet
-	quicClient, err := selectTransport(ctx, muxClient, addr, plan, state)
+	quicClient, lanes, err := r.openTransport(ctx, muxClient, helperPath)
 	if err != nil {
+		closeTransport(nil, nil, muxClient, client)
 		return err
 	}
-	if quicClient != nil {
-		defer func() { _ = quicClient.Close() }()
-		dialer = quicClient
-		quicWait = quicClient.Wait()
-		unlinkHelper(muxClient)
-	} else {
-		lanes, err = openLaneSet(ctx, muxClient, addr, plan, set, plat.Paths.CacheDir(), helperPath)
-		if err != nil {
-			return err
+	unlinkHelper(muxClient)
+
+	// The device exists from the second attempt on, and the DNS mode then
+	// goes back on it here. The first connect applies it after the routes.
+	if r.device != "" {
+		if err := applyDNS(r.plat, r.device, r.plan); err != nil {
+			closeTransport(quicClient, lanes, muxClient, client)
+			return fmt.Errorf("apply dns: %w", err)
 		}
-		defer lanes.stop()
-		unlinkHelper(muxClient)
-		dialer = lanes.dialer
-		state.Lanes = lanes.names
 	}
 
-	dev, name, err := plat.Device.Create(deviceName, deviceMTU)
+	r.sshClient, r.muxClient, r.quicClient, r.lanes = client, muxClient, quicClient, lanes
+	r.muxWait = muxClient.Wait()
+	if quicClient != nil {
+		r.quicWait = quicClient.Wait()
+		r.dialer.set(quicClient)
+		return nil
+	}
+	r.laneClosed = lanes.closed()
+	r.state.Lanes = lanes.names
+	r.dialer.set(lanes.dialer)
+	return nil
+}
+
+// openTransport brings the transport up on a fresh mux. The first connect
+// selects it and records the outcome; a later attempt keeps the transport
+// the session started with, so its latency profile and its state file do not
+// change under the running flows.
+func (r *runner) openTransport(ctx context.Context, muxClient *mux.Client, helperPath string) (*mux.QUICClient, *laneSet, error) {
+	switch r.state.Transport {
+	case "":
+		q, err := selectTransport(ctx, muxClient, r.addr, r.plan, r.state)
+		if err != nil || q != nil {
+			return q, nil, err
+		}
+	case TransportQUIC:
+		q, err := redialQUIC(ctx, muxClient, r.addr, r.plan)
+		if err != nil {
+			return nil, nil, err
+		}
+		r.state.QUICPort = q.Port()
+		return q, nil, nil
+	}
+	lanes, err := openLaneSet(ctx, muxClient, r.addr, r.plan, r.set, r.plat.Paths.CacheDir(), helperPath)
+	if err != nil {
+		return nil, nil, err
+	}
+	return nil, lanes, nil
+}
+
+// setup creates the device, adds the routes, applies the DNS mode, and
+// starts the data plane on the switch dialer. It runs once: a reconnect
+// keeps all of it, so the flows of the session survive the gap.
+func (r *runner) setup(ctx context.Context) error {
+	dev, name, err := r.plat.Device.Create(deviceName, deviceMTU)
 	if err != nil {
 		return fmt.Errorf("create device: %w", err)
 	}
-	if err := plat.Device.Configure(name, deviceAddrs); err != nil {
-		teardownDevice(plat, dev, name)
+	if err := r.plat.Device.Configure(name, deviceAddrs); err != nil {
+		teardownDevice(r.plat, dev, name)
 		return fmt.Errorf("configure device: %w", err)
 	}
 
-	routes, err := routePrefixes(plan)
+	routes, err := routePrefixes(r.plan)
 	if err != nil {
-		teardownDevice(plat, dev, name)
+		teardownDevice(r.plat, dev, name)
 		return err
 	}
-	if err := plat.Router.Add(name, routes); err != nil {
-		teardownDevice(plat, dev, name)
+	if err := r.plat.Router.Add(name, routes); err != nil {
+		teardownDevice(r.plat, dev, name)
 		return fmt.Errorf("add routes: %w", err)
 	}
 
-	if err := applyDNS(plat, name, plan); err != nil {
-		removeRoutes(plat, name, routes)
-		teardownDevice(plat, dev, name)
+	if err := applyDNS(r.plat, name, r.plan); err != nil {
+		removeRoutes(r.plat, name, routes)
+		teardownDevice(r.plat, dev, name)
 		return fmt.Errorf("apply dns: %w", err)
 	}
 
-	dp, err := dataplane.New(dev, dialer, deviceMTU, set)
+	dp, err := dataplane.New(dev, r.dialer, deviceMTU, r.set)
 	if err != nil {
-		revertDNS(plat, name)
-		removeRoutes(plat, name, routes)
-		teardownDevice(plat, dev, name)
+		revertDNS(r.plat, name)
+		removeRoutes(r.plat, name, routes)
+		teardownDevice(r.plat, dev, name)
 		return fmt.Errorf("start data plane: %w", err)
 	}
 	dp.Run(ctx)
 
-	state.Status = StatusUp
-	if err := writeState(statePath, state); err != nil {
-		slog.Warn("write up state", "error", err)
-	}
-	slog.Info("session up", "remote", plan.Remote, "networks", len(plan.Networks), "dns", plan.DNS.Mode, "transport", state.Transport, "protocols", state.Protocols)
-	stopWatch := watchTransportPath(ctx, addr)
+	r.device, r.routes, r.dp = name, routes, dp
+	return nil
+}
 
+// loop waits on the current transport and rebuilds it after a loss. It
+// returns when a signal stops the session, when the reconnect window passes,
+// and with the error that ends the session.
+func (r *runner) loop(ctx context.Context) error {
+	for {
+		ev, lost := r.wait(ctx)
+		if !lost {
+			slog.Info("session stopping on signal")
+			return nil
+		}
+		if r.plan.ReconnectFor <= 0 {
+			ev.logEnded()
+			return nil
+		}
+		r.lost(ev.reason)
+		up, err := r.reconnect(ctx)
+		if err != nil || !up {
+			return err
+		}
+	}
+}
+
+// wait blocks until a signal stops the session or the transport is lost. It
+// selects on the channels of the current transport only: a close fires the
+// channels of the transport it closes, so an old one would report a loss the
+// session already handled.
+func (r *runner) wait(ctx context.Context) (lossEvent, bool) {
 	select {
 	case <-ctx.Done():
-		slog.Info("session stopping on signal")
-	case <-muxClient.Wait():
-		slog.Warn("session ended: mux closed")
-	case name := <-lanes.closed():
-		slog.Warn("session ended: lane mux closed", "lane", name)
-	case <-quicWait:
-		slog.Warn("session ended: quic connection closed")
+		return lossEvent{}, false
+	case <-r.muxWait:
+		return lossEvent{reason: "mux closed"}, true
+	case lane := <-r.laneClosed:
+		return lossEvent{reason: fmt.Sprintf("lane mux closed (%s)", lane), lane: lane}, true
+	case <-r.quicWait:
+		return lossEvent{reason: "quic connection closed"}, true
+	case reason := <-r.resumeLoss:
+		return lossEvent{reason: reason}, true
 	}
+}
 
-	state.Status = StatusStopping
-	_ = writeState(statePath, state)
-	stopWatch()
-	revertDNS(plat, name)
-	removeRoutes(plat, name, routes)
-	resetRoutes(plat)
-	if quicClient != nil {
-		_ = quicClient.Close()
+// markUp writes the state of a session that is up, and drops the reconnect
+// progress of the loss it recovered from.
+func (r *runner) markUp() {
+	r.state.Status = StatusUp
+	r.state.Reconnect = nil
+	if err := writeState(r.statePath, r.state); err != nil {
+		slog.Warn("write up state", "error", err)
 	}
-	if err := muxClient.Quit(); err != nil {
-		slog.Debug("quit helper", "error", err)
+}
+
+func (r *runner) writeState() {
+	if err := writeState(r.statePath, r.state); err != nil {
+		slog.Warn("write session state", "error", err)
 	}
-	lanes.stop()
-	_ = dp.Close()
-	dp.Wait()
-	teardownDevice(plat, nil, name)
-	slog.Info("session down", "remote", plan.Remote)
-	return nil
+}
+
+// dropTransport closes the current transport and forgets it, so the wait
+// selects on the channels of the next one only.
+func (r *runner) dropTransport() {
+	closeTransport(r.quicClient, r.lanes, r.muxClient, r.sshClient)
+	r.quicClient, r.lanes, r.muxClient, r.sshClient = nil, nil, nil, nil
+	r.muxWait, r.quicWait, r.laneClosed = nil, nil, nil
+}
+
+// closeTransport closes the parts of one transport without the quit verb.
+// The peer of a lost transport is gone, and a control write would then wait
+// for the yamux write timeout.
+//
+// The SSH connection closes before the mux. A Close on an SSH channel does
+// not end a Read that waits for data, and a yamux Close waits for its
+// receive loop, so the mux of a dead peer closes only when the connection
+// under it is gone.
+func closeTransport(q *mux.QUICClient, lanes *laneSet, muxClient *mux.Client, client *sshc.Client) {
+	if q != nil {
+		_ = q.Close()
+	}
+	if client != nil {
+		_ = client.Close()
+	}
+	lanes.close()
+	if muxClient != nil {
+		_ = muxClient.Close()
+	}
+}
+
+// stopSession reverts every change of the session, in the order of the
+// setup. Every step tolerates a part that is already gone.
+func (r *runner) stopSession() {
+	r.state.Status = StatusStopping
+	r.writeState()
+	r.stopWatch()
+	r.stopResume()
+	revertDNS(r.plat, r.device)
+	removeRoutes(r.plat, r.device, r.routes)
+	resetRoutes(r.plat)
+	if r.quicClient != nil {
+		_ = r.quicClient.Close()
+	}
+	if r.muxClient != nil {
+		if err := r.muxClient.Quit(); err != nil {
+			slog.Debug("quit helper", "error", err)
+		}
+	}
+	r.lanes.stop()
+	if r.dp != nil {
+		_ = r.dp.Close()
+		r.dp.Wait()
+	}
+	teardownDevice(r.plat, nil, r.device)
 }
 
 // teardownDevice deletes the device and logs a failure, so a setup or

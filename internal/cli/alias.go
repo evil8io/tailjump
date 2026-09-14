@@ -15,7 +15,7 @@ import (
 
 // aliasFields are the fields tj alias unset accepts. host is not among
 // them, because an alias needs it.
-var aliasFields = []string{"user", "dns", "transport", "protocols", "networks", "exclude"}
+var aliasFields = []string{"user", "dns", "transport", "protocols", "networks", "exclude", "reconnect_for"}
 
 // newAliasCmd is the tj alias command group. It manages the config aliases
 // under remotes. It is a separate command from the hidden _remote helper.
@@ -121,7 +121,7 @@ func newAliasAddCmd() *cobra.Command {
 		Use:   "add <alias>",
 		Short: "Add a config alias",
 		Long: `tj alias add <alias> --host <host> creates a new alias in the config file.
---dns, --transport, --protocols, --network, and --exclude set the alias fields that connect uses before the config defaults.`,
+--dns, --transport, --protocols, --reconnect-for, --network, and --exclude set the alias fields that connect uses before the config defaults.`,
 		Example: `  tj alias add gw --host gw.example
   tj alias add gw --host gw.example --dns split
   tj alias add gw --host gw.example --network 10.0.0.0/16`,
@@ -199,7 +199,7 @@ func newAliasUnsetCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "unset <alias> <field>...",
 		Short: "Clear one or more fields of a config alias",
-		Long: `tj alias unset <alias> <field>... clears one or more fields: user, dns, transport, protocols, networks, or exclude.
+		Long: `tj alias unset <alias> <field>... clears one or more fields: user, dns, transport, protocols, networks, exclude, or reconnect_for.
 host is not a valid field, because an alias needs it.`,
 		Args:              cobra.MinimumNArgs(2),
 		ValidArgsFunction: completeAliasUnset,
@@ -228,6 +228,8 @@ host is not a valid field, because an alias needs it.`,
 					rc.Networks = nil
 				case "exclude":
 					rc.Exclude = nil
+				case "reconnect_for":
+					rc.ReconnectFor = ""
 				default:
 					return &ExitError{Code: 2, Err: fmt.Errorf("unknown field %q; want %s", field, strings.Join(aliasFields, ", "))}
 				}
@@ -277,6 +279,7 @@ func addRemoteFlags(cmd *cobra.Command) {
 	cmd.Flags().Var(&dnsModeValue{}, "dns", "the DNS mode")
 	cmd.Flags().Var(&transportModeValue{}, "transport", "the data plane transport")
 	cmd.Flags().Var(&protocolSetValue{}, "protocols", "the protocols to forward")
+	cmd.Flags().Var(&reconnectForValue{}, "reconnect-for", "the reconnect window after a session loss")
 	cmd.Flags().StringArray("network", nil, "a CIDR to route for this remote, repeatable; replaces the whole list")
 	cmd.Flags().StringArray("exclude", nil, "a CIDR to exclude for this remote, repeatable; replaces the whole list")
 	registerRemoteFlagCompletions(cmd)
@@ -303,6 +306,9 @@ func remoteFromFlags(cmd *cobra.Command, base config.RemoteConfig) (config.Remot
 	}
 	if f.Changed("protocols") {
 		rc.Protocols = flagString(cmd, "protocols")
+	}
+	if f.Changed("reconnect-for") {
+		rc.ReconnectFor = flagString(cmd, "reconnect-for")
 	}
 	if f.Changed("network") {
 		v, _ := f.GetStringArray("network")

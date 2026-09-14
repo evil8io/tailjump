@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/evil8io/tailjump/internal/platform"
 	"github.com/evil8io/tailjump/internal/platform/fake"
@@ -14,6 +15,7 @@ import (
 func samplePlan() *Plan {
 	return &Plan{
 		Remote:   "gw.example",
+		Ref:      "gw.example",
 		Addr:     "100.64.0.10",
 		User:     "root",
 		Networks: []string{"10.0.0.0/16", "2001:db8::/56"},
@@ -141,6 +143,103 @@ func TestActiveSessionFree(t *testing.T) {
 	}
 	if active {
 		t.Fatal("want no active session")
+	}
+}
+
+// TestAlreadyUp checks the rule tj connect applies to an active session: the
+// address of the plan is the same session, and so is the reference of the
+// plan while that session reconnects, because the address in the state is
+// then the address the session lost.
+func TestAlreadyUp(t *testing.T) {
+	plan := samplePlan()
+	reconnecting := func(addr, ref string) *State {
+		return &State{
+			Remote:    "gw.example",
+			Ref:       ref,
+			Addr:      addr,
+			Status:    StatusReconnecting,
+			StartedAt: "2026-09-11T10:00:00Z",
+			Reconnect: &ReconnectState{Since: "2026-09-11T10:05:00Z", Attempts: 2, Reason: "mux closed"},
+		}
+	}
+	cases := []struct {
+		name  string
+		state *State
+		want  bool
+	}{
+		{
+			name:  "up on the address of the plan",
+			state: &State{Remote: "gw.example", Ref: "gw.example", Addr: "100.64.0.10", Status: StatusUp, StartedAt: "2026-09-11T10:00:00Z"},
+			want:  true,
+		},
+		{
+			name:  "up on another address",
+			state: &State{Remote: "other.example", Ref: "other.example", Addr: "100.64.0.11", Status: StatusUp, StartedAt: "2026-09-11T10:00:00Z"},
+		},
+		{
+			name:  "reconnecting on the reference of the plan",
+			state: reconnecting("100.64.0.11", "gw.example"),
+			want:  true,
+		},
+		{
+			name:  "reconnecting on another reference",
+			state: reconnecting("100.64.0.11", "other.example"),
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			dir := t.TempDir()
+			if err := writeState(StatePath(dir), c.state); err != nil {
+				t.Fatalf("write state: %v", err)
+			}
+			plat := platform.Platform{
+				Runner: &fake.Runner{ActiveValue: true},
+				Paths:  &fake.Paths{RuntimeDirValue: dir},
+			}
+			st := alreadyUp(plat, plan)
+			if (st != nil) != c.want {
+				t.Fatalf("alreadyUp = %v, want match %v", st, c.want)
+			}
+			if st == nil {
+				return
+			}
+			line := upLine(st)
+			if c.state.Status == StatusReconnecting && !strings.Contains(line, "is reconnecting (attempt 2)") {
+				t.Fatalf("line = %q, want the attempt of the reconnect", line)
+			}
+			if c.state.Status == StatusUp && !strings.Contains(line, "already up") {
+				t.Fatalf("line = %q, want the already up line", line)
+			}
+		})
+	}
+}
+
+// TestStatusLine checks the status tj status prints, with the attempt, the
+// time since the loss, and the reason of a reconnecting session.
+func TestStatusLine(t *testing.T) {
+	up := &State{Status: StatusUp}
+	if got := up.StatusLine(); got != StatusUp {
+		t.Errorf("StatusLine = %q, want %q", got, StatusUp)
+	}
+
+	since := time.Now().Add(-40 * time.Second).UTC().Format(time.RFC3339Nano)
+	st := &State{
+		Status:    StatusReconnecting,
+		Reconnect: &ReconnectState{Since: since, Attempts: 3, Reason: "quic connection closed"},
+	}
+	want := "reconnecting (attempt 3, 40s; quic connection closed)"
+	if got := st.StatusLine(); got != want {
+		t.Errorf("StatusLine = %q, want %q", got, want)
+	}
+
+	st.Reconnect.Reason = ""
+	if got := st.StatusLine(); got != "reconnecting (attempt 3, 40s)" {
+		t.Errorf("StatusLine without a reason = %q", got)
+	}
+
+	st.Reconnect = nil
+	if got := st.StatusLine(); got != StatusReconnecting {
+		t.Errorf("StatusLine without the progress = %q, want %q", got, StatusReconnecting)
 	}
 }
 

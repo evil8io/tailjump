@@ -136,3 +136,36 @@ func TestRunWrapsExecError(t *testing.T) {
 		t.Fatal("want an error when exec fails")
 	}
 }
+
+func TestFetchManifest(t *testing.T) {
+	path, content, err := FetchManifest(func(string) ([]byte, error) {
+		return []byte("/etc/tj/manifest.yaml\nversion: 1\n"), nil
+	})
+	if err != nil {
+		t.Fatalf("FetchManifest: %v", err)
+	}
+	if path != "/etc/tj/manifest.yaml" || string(content) != "version: 1\n" {
+		t.Fatalf("FetchManifest = %q, %q, want %q, %q", path, content, "/etc/tj/manifest.yaml", "version: 1\n")
+	}
+}
+
+func TestFetchManifestNoManifest(t *testing.T) {
+	path, content, err := FetchManifest(func(string) ([]byte, error) {
+		return []byte("\n"), nil
+	})
+	if err != nil {
+		t.Fatalf("FetchManifest: %v", err)
+	}
+	if path != "" || content != nil {
+		t.Fatalf("FetchManifest = %q, %v, want empty path and nil content", path, content)
+	}
+}
+
+func TestFetchManifestWrapsRunError(t *testing.T) {
+	_, _, err := FetchManifest(func(string) ([]byte, error) {
+		return nil, errors.New("boom")
+	})
+	if err == nil {
+		t.Fatal("want an error when run fails")
+	}
+}
