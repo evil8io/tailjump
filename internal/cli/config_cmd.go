@@ -8,9 +8,6 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/evil8io/tailjump/internal/config"
-	"github.com/evil8io/tailjump/internal/dns"
-	"github.com/evil8io/tailjump/internal/protocols"
-	"github.com/evil8io/tailjump/internal/transport"
 )
 
 // newConfigCmd is the tj config command group. It reads and writes the
@@ -102,18 +99,21 @@ func newConfigSetCmd() *cobra.Command {
 			case "defaults.user":
 				cfg.Defaults.User = value
 			case "defaults.dns":
-				if !dns.Valid(value) {
-					return fmt.Errorf("invalid dns %q, want none, split, or all", value)
+				var v dnsModeValue
+				if err := v.Set(value); err != nil {
+					return fmt.Errorf("invalid dns %q, %w", value, err)
 				}
 				cfg.Defaults.DNS = value
 			case "defaults.transport":
-				if !transport.Valid(value) {
-					return fmt.Errorf("invalid transport %q, want auto, quic, or ssh", value)
+				var v transportModeValue
+				if err := v.Set(value); err != nil {
+					return fmt.Errorf("invalid transport %q, %w", value, err)
 				}
 				cfg.Defaults.Transport = value
 			case "defaults.protocols":
-				if !protocols.Valid(value) {
-					return fmt.Errorf("invalid protocols %q, want a list of tcp, udp, and icmp", value)
+				var v protocolSetValue
+				if err := v.Set(value); err != nil {
+					return fmt.Errorf("invalid protocols %q, %w", value, err)
 				}
 				cfg.Defaults.Protocols = value
 			default:

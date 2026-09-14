@@ -33,9 +33,9 @@ func newConnectCmd() *cobra.Command {
 		RunE:    runConnect,
 	}
 	cmd.Flags().String("user", "", "the SSH user")
-	cmd.Flags().String("dns", "", "the DNS mode: none, split, or all")
-	cmd.Flags().String("transport", "", "the data plane transport: auto, quic, or ssh")
-	cmd.Flags().String("protocols", "", "the protocols to forward, a list of tcp, udp, and icmp")
+	cmd.Flags().Var(&dnsModeValue{}, "dns", "the DNS mode")
+	cmd.Flags().Var(&transportModeValue{}, "transport", "the data plane transport")
+	cmd.Flags().Var(&protocolSetValue{}, "protocols", "the protocols to forward")
 	cmd.Flags().StringArray("network", nil, "an extra CIDR to route, on top of the manifest and discovery, repeatable")
 	cmd.Flags().StringArray("exclude", nil, "a CIDR to exclude from the session, repeatable")
 	cmd.Flags().Bool("no-discovery", false, "skip discovery")
@@ -45,23 +45,13 @@ func newConnectCmd() *cobra.Command {
 
 func runConnect(cmd *cobra.Command, args []string) error {
 	flagUser, _ := cmd.Flags().GetString("user")
-	dnsFlag, _ := cmd.Flags().GetString("dns")
-	transportFlag, _ := cmd.Flags().GetString("transport")
-	protocolsFlag, _ := cmd.Flags().GetString("protocols")
+	dnsFlag := flagString(cmd, "dns")
+	transportFlag := flagString(cmd, "transport")
+	protocolsFlag := flagString(cmd, "protocols")
 	networkFlags, _ := cmd.Flags().GetStringArray("network")
 	excludeFlags, _ := cmd.Flags().GetStringArray("exclude")
 	noDiscovery, _ := cmd.Flags().GetBool("no-discovery")
 	replace, _ := cmd.Flags().GetBool("replace")
-
-	if dnsFlag != "" && !dns.Valid(dnsFlag) {
-		return fmt.Errorf("invalid --dns %q, want none, split, or all", dnsFlag)
-	}
-	if transportFlag != "" && !transport.Valid(transportFlag) {
-		return fmt.Errorf("invalid --transport %q, want auto, quic, or ssh", transportFlag)
-	}
-	if protocolsFlag != "" && !protocols.Valid(protocolsFlag) {
-		return fmt.Errorf("invalid --protocols %q, want a list of tcp, udp, and icmp", protocolsFlag)
-	}
 
 	ctx := cmd.Context()
 	cfg, err := loadLocalConfig()

@@ -10,10 +10,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/evil8io/tailjump/internal/config"
-	"github.com/evil8io/tailjump/internal/dns"
 	"github.com/evil8io/tailjump/internal/manifest"
-	"github.com/evil8io/tailjump/internal/protocols"
-	"github.com/evil8io/tailjump/internal/transport"
 )
 
 // newAliasCmd is the tj alias command group. It manages the config aliases
@@ -205,17 +202,17 @@ func newAliasRmCmd() *cobra.Command {
 func addRemoteFlags(cmd *cobra.Command) {
 	cmd.Flags().String("host", "", "the remote host")
 	cmd.Flags().String("user", "", "the SSH user")
-	cmd.Flags().String("dns", "", "the DNS mode: none, split, or all")
-	cmd.Flags().String("transport", "", "the data plane transport: auto, quic, or ssh")
-	cmd.Flags().String("protocols", "", "the protocols to forward, a list of tcp, udp, and icmp")
+	cmd.Flags().Var(&dnsModeValue{}, "dns", "the DNS mode")
+	cmd.Flags().Var(&transportModeValue{}, "transport", "the data plane transport")
+	cmd.Flags().Var(&protocolSetValue{}, "protocols", "the protocols to forward")
 	cmd.Flags().StringArray("network", nil, "a CIDR to route for this remote, repeatable")
 	cmd.Flags().StringArray("exclude", nil, "a CIDR to exclude for this remote, repeatable")
 }
 
 // remoteFromFlags returns base with the fields whose flags were set on cmd
-// overwritten. It validates the DNS mode, the transport, the protocol set,
-// and every CIDR before it returns, so a bad value fails before the config
-// is written.
+// overwritten. pflag validates the DNS mode, the transport, and the
+// protocol set at parse time; this function still validates every CIDR, so
+// a bad one fails before the config is written.
 func remoteFromFlags(cmd *cobra.Command, base config.RemoteConfig) (config.RemoteConfig, error) {
 	rc := base
 	f := cmd.Flags()
@@ -226,25 +223,13 @@ func remoteFromFlags(cmd *cobra.Command, base config.RemoteConfig) (config.Remot
 		rc.User, _ = f.GetString("user")
 	}
 	if f.Changed("dns") {
-		v, _ := f.GetString("dns")
-		if !dns.Valid(v) {
-			return rc, fmt.Errorf("invalid --dns %q, want none, split, or all", v)
-		}
-		rc.DNS = v
+		rc.DNS = flagString(cmd, "dns")
 	}
 	if f.Changed("transport") {
-		v, _ := f.GetString("transport")
-		if !transport.Valid(v) {
-			return rc, fmt.Errorf("invalid --transport %q, want auto, quic, or ssh", v)
-		}
-		rc.Transport = v
+		rc.Transport = flagString(cmd, "transport")
 	}
 	if f.Changed("protocols") {
-		v, _ := f.GetString("protocols")
-		if !protocols.Valid(v) {
-			return rc, fmt.Errorf("invalid --protocols %q, want a list of tcp, udp, and icmp", v)
-		}
-		rc.Protocols = v
+		rc.Protocols = flagString(cmd, "protocols")
 	}
 	if f.Changed("network") {
 		v, _ := f.GetStringArray("network")
