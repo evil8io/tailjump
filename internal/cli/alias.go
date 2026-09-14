@@ -23,7 +23,7 @@ func newAliasCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:        "alias",
 		Short:      "Manage the config aliases for remotes",
-		Long:       "Manage the config aliases for remotes.\n\n" + configLong,
+		Long:       "tj alias manages the aliases in the config file, which connect and describe expand to a host.\n\n" + configLong,
 		Args:       cobra.NoArgs,
 		SuggestFor: []string{"remote"},
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -46,7 +46,9 @@ func newAliasListCmd() *cobra.Command {
 		Use:     "list",
 		Aliases: []string{"ls"},
 		Short:   "List the config aliases",
-		Args:    cobra.NoArgs,
+		Long: `tj alias list prints every alias, with its host, user, DNS mode, transport, protocols, networks, and exclude list.
+ls is an alias for this command.`,
+		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			asJSON, _ := cmd.Flags().GetBool("json")
 			cfg, err := config.Load(localConfigPath())
@@ -82,6 +84,7 @@ func newAliasShowCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:               "show <alias>",
 		Short:             "Show one config alias",
+		Long:              "tj alias show <alias> prints the host, the user, and the other fields of one config alias.",
 		Args:              cobra.ExactArgs(1),
 		ValidArgsFunction: completeAlias,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -117,7 +120,12 @@ func newAliasAddCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "add <alias>",
 		Short: "Add a config alias",
-		Args:  cobra.ExactArgs(1),
+		Long: `tj alias add <alias> --host <host> creates a new alias in the config file.
+--dns, --transport, --protocols, --network, and --exclude set the alias fields that connect uses before the config defaults.`,
+		Example: `  tj alias add gw --host gw.example
+  tj alias add gw --host gw.example --dns split
+  tj alias add gw --host gw.example --network 10.0.0.0/16`,
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			alias := args[0]
 			path := localConfigPath()
@@ -150,8 +158,14 @@ func newAliasAddCmd() *cobra.Command {
 
 func newAliasSetCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:               "set <alias>",
-		Short:             "Update an existing config alias",
+		Use:   "set <alias>",
+		Short: "Update an existing config alias",
+		Long: `tj alias set <alias> updates the fields of an alias that tj alias add already created.
+The flags replace only the fields you give.
+--network and --exclude replace the whole list, not add to it.`,
+		Example: `  tj alias set gw --dns split
+  tj alias set gw --transport quic --protocols tcp,udp
+  tj alias set gw --network 10.0.0.0/16`,
 		Args:              cobra.ExactArgs(1),
 		ValidArgsFunction: completeAlias,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -183,8 +197,10 @@ func newAliasSetCmd() *cobra.Command {
 
 func newAliasUnsetCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:               "unset <alias> <field>...",
-		Short:             "Clear one or more fields of a config alias",
+		Use:   "unset <alias> <field>...",
+		Short: "Clear one or more fields of a config alias",
+		Long: `tj alias unset <alias> <field>... clears one or more fields: user, dns, transport, protocols, networks, or exclude.
+host is not a valid field, because an alias needs it.`,
 		Args:              cobra.MinimumNArgs(2),
 		ValidArgsFunction: completeAliasUnset,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -228,9 +244,11 @@ func newAliasUnsetCmd() *cobra.Command {
 
 func newAliasRmCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:               "remove <alias>",
-		Aliases:           []string{"rm"},
-		Short:             "Remove a config alias",
+		Use:     "remove <alias>",
+		Aliases: []string{"rm"},
+		Short:   "Remove a config alias",
+		Long: `tj alias remove <alias> deletes the alias from the config file.
+rm is an alias for this command.`,
 		Args:              cobra.ExactArgs(1),
 		ValidArgsFunction: completeAlias,
 		RunE: func(cmd *cobra.Command, args []string) error {

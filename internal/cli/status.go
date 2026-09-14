@@ -15,9 +15,12 @@ func newStatusCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "status",
 		Aliases: []string{"st"},
-		Short:   "Print the active session, its transport, its path, its protocols, its networks, the DNS mode, and the uptime",
-		Args:    cobra.NoArgs,
-		RunE:    runStatus,
+		Short:   "Print the active session",
+		Long: `tj status prints the active session: the remote, the transport, the DNS mode, and the uptime.
+It reads the local state file and needs no root privilege.
+With no active session, it prints that fact and exits 0.`,
+		Args: cobra.NoArgs,
+		RunE: runStatus,
 	}
 	cmd.Flags().Bool("json", false, "print JSON output")
 	return cmd

@@ -18,6 +18,7 @@ import (
 func newSessionCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:    "_session",
+		Short:  "Run the privileged session subcommands",
 		Hidden: true,
 		Args:   cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -37,6 +38,7 @@ func newSessionCmd() *cobra.Command {
 func newSessionStartCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:    "start",
+		Short:  "Start the session unit from a plan on stdin",
 		Hidden: true,
 		Args:   cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -58,6 +60,7 @@ func newSessionStartCmd() *cobra.Command {
 func newSessionRunCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:    "run <plan>",
+		Short:  "Run the session in the foreground",
 		Hidden: true,
 		// systemd stops the unit with SIGTERM, and Run then reverts the
 		// session and returns nil. An exit 130 would mark the unit failed.
@@ -72,6 +75,7 @@ func newSessionRunCmd() *cobra.Command {
 func newSessionStopCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:    "stop",
+		Short:  "Stop the session unit",
 		Hidden: true,
 		Args:   cobra.NoArgs,
 		RunE: func(_ *cobra.Command, _ []string) error {
@@ -83,6 +87,7 @@ func newSessionStopCmd() *cobra.Command {
 func newSessionCleanupCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:    "cleanup",
+		Short:  "Clean up the session state after a stop",
 		Hidden: true,
 		Args:   cobra.NoArgs,
 		RunE: func(_ *cobra.Command, _ []string) error {
@@ -94,6 +99,7 @@ func newSessionCleanupCmd() *cobra.Command {
 func newSessionLogsCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:    "logs",
+		Short:  "Print the session log as root",
 		Hidden: true,
 		Args:   cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {

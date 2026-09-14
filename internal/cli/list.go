@@ -44,8 +44,15 @@ func newListCmd() *cobra.Command {
 		Use:     "list",
 		Aliases: []string{"ls"},
 		Short:   "List the online tailnet peers",
-		Args:    cobra.NoArgs,
-		RunE:    runList,
+		Long: `tj list prints every online tailnet peer, with its alias, tags, and address.
+--tag filters the peers by tag, and --path pings an idle peer to learn its route.
+--probe opens SSH to each peer, 8 at a time, and marks whether it has a manifest.
+It caches no probe result, so each run opens SSH again.`,
+		Example: `  tj list
+  tj list --tag tag:example
+  tj list --probe --json`,
+		Args: cobra.NoArgs,
+		RunE: runList,
 	}
 	cmd.Flags().String("tag", "", "list only peers with this tag")
 	cmd.Flags().Bool("probe", false, "open SSH to each peer and mark the ones with a manifest")

@@ -27,9 +27,17 @@ const exitActiveSession = 3
 
 func newConnectCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:               "connect <remote>",
-		Aliases:           []string{"up"},
-		Short:             "Start a session into the remote's network",
+		Use:     "connect <remote>",
+		Aliases: []string{"up"},
+		Short:   "Start a session into the remote's network",
+		Long: `tj connect <remote> starts a session into the remote's network over Tailscale SSH.
+Each flag wins over the matching alias field, which wins over the config default.
+It creates the tj0 device, adds the session routes, and applies the DNS mode on the client.
+A connect to the remote of the active session prints already up and exits 0, unless --replace or the remote differs.`,
+		Example: `  tj connect tag:example --dns split
+  tj connect gw.example --protocols tcp,udp --network 10.0.0.0/16
+  # print the plan and start no session
+  tj connect gw.example --dry-run`,
 		Args:              cobra.ExactArgs(1),
 		RunE:              runConnect,
 		ValidArgsFunction: completeRemote,

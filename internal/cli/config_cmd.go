@@ -15,12 +15,12 @@ import (
 // configKeys are the keys tj config set and tj config unset accept.
 var configKeys = []string{"defaults.user", "defaults.dns", "defaults.transport", "defaults.protocols", "exclude"}
 
-// configLong is the tj config and tj alias Long text. A CLI write of either
-// command group replaces the whole config file, so it drops the comments of
-// a file an engineer edited by hand; editing the file directly keeps them,
-// and the next tj command that loads the file validates it.
-const configLong = `A CLI write removes the comments in the config file.
-Edit the file by hand to keep the comments.
+// configLong is the shared part of the tj config and tj alias Long text. A
+// CLI write of either command group replaces the whole config file, so it
+// drops the comments of a file an engineer edited by hand; editing the file
+// directly keeps them, and the next tj command that loads the file
+// validates it.
+const configLong = `A CLI write replaces the whole file and drops its comments, so edit it by hand to keep them.
 Run $EDITOR $(tj config path) to open it.
 The next tj command validates the file.`
 
@@ -31,7 +31,7 @@ func newConfigCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "config",
 		Short: "Manage the tj defaults",
-		Long:  "Manage the tj defaults and the global exclude list.\n\n" + configLong,
+		Long:  "tj config manages the defaults and the global exclude list.\n\n" + configLong,
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return cmd.Help()
@@ -50,7 +50,9 @@ func newConfigPathCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "path",
 		Short: "Print the resolved config file path",
-		Args:  cobra.NoArgs,
+		Long: `tj config path prints the path of the local config file, $XDG_CONFIG_HOME/tj/config.yaml.
+Open it with $EDITOR $(tj config path) to edit the file by hand.`,
+		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			_, err := fmt.Fprintln(cmd.OutOrStdout(), localConfigPath())
 			return err
@@ -70,7 +72,9 @@ func newConfigGetCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "get",
 		Short: "Print the defaults and the global exclude list",
-		Args:  cobra.NoArgs,
+		Long: `tj config get prints defaults.user, defaults.dns, defaults.transport, defaults.protocols, and the global exclude list.
+connect applies these values only when the flag and the matching alias field are empty.`,
+		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			asJSON, _ := cmd.Flags().GetBool("json")
 			cfg, err := config.Load(localConfigPath())
@@ -101,8 +105,13 @@ func newConfigGetCmd() *cobra.Command {
 
 func newConfigSetCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:               "set <key> <value>",
-		Short:             "Set defaults.user, defaults.dns, defaults.transport, defaults.protocols, or exclude",
+		Use:   "set <key> <value>",
+		Short: "Set defaults.user, defaults.dns, defaults.transport, defaults.protocols, or exclude",
+		Long: `tj config set <key> <value> sets one default or the global exclude list.
+connect applies a default only when the flag and the matching alias field are empty.`,
+		Example: `  tj config set defaults.dns split
+  tj config set defaults.protocols tcp,udp
+  tj config set exclude 10.0.0.0/16`,
 		Args:              cobra.ExactArgs(2),
 		ValidArgsFunction: completeConfigSetValue,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -153,8 +162,10 @@ func newConfigSetCmd() *cobra.Command {
 
 func newConfigUnsetCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:               "unset <key>",
-		Short:             "Clear defaults.user, defaults.dns, defaults.transport, defaults.protocols, or exclude",
+		Use:   "unset <key>",
+		Short: "Clear defaults.user, defaults.dns, defaults.transport, defaults.protocols, or exclude",
+		Long: `tj config unset <key> clears one default or the global exclude list.
+An unknown key is a usage error, and the message lists the valid keys.`,
 		Args:              cobra.ExactArgs(1),
 		ValidArgsFunction: completeConfigKey,
 		RunE: func(cmd *cobra.Command, args []string) error {

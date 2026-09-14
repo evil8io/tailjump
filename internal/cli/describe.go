@@ -18,9 +18,16 @@ import (
 
 func newDescribeCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:               "describe <remote>",
-		Aliases:           []string{"desc"},
-		Short:             "Print the merged config for a remote without a session",
+		Use:     "describe <remote>",
+		Aliases: []string{"desc"},
+		Short:   "Print the merged config for a remote without a session",
+		Long: `tj describe <remote> prints the manifest, the discovery result, and the session networks for one remote, without opening a session.
+It also prints the transport and the DNS mode it would use, with the servers and the domains.
+--no-discovery skips discovery and reads the manifest only.
+It resolves these the way connect would, with no flag to override them.`,
+		Example: `  tj describe gw.example
+  tj describe tag:example --json
+  tj describe gw.example --no-discovery`,
 		Args:              cobra.ExactArgs(1),
 		RunE:              runDescribe,
 		ValidArgsFunction: completeRemote,

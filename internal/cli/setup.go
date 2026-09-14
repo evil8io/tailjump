@@ -22,8 +22,12 @@ const (
 func newSetupCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "setup",
-		Short: "Write the sudoers rule and check the required tools",
-		Args:  cobra.NoArgs,
+		Short: "Install the root copy and the sudoers rule",
+		Long: `tj setup installs a root copy of tj at /usr/local/libexec/tj/tj.
+It writes a sudoers rule that lets the root copy run without a password prompt.
+On Linux it also checks systemd-run and /dev/net/tun.
+It skips sudo when the root copy is already current.`,
+		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return runSetup(cmd)
 		},

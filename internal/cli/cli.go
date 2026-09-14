@@ -19,6 +19,14 @@ import (
 // docs/architecture.md, "CLI conventions".
 const exitInterrupted = 130
 
+// Root help groups, in the order the root help prints them. See
+// docs/architecture.md, "CLI conventions".
+const (
+	groupSession   = "session"
+	groupInspect   = "inspect"
+	groupConfigure = "configure"
+)
+
 // signalExitZero is the annotation of a command that exits 0 after a signal
 // instead of exitInterrupted.
 const signalExitZero = "tj.signal-exit-zero"
@@ -75,8 +83,12 @@ func newRootCmd() *cobra.Command {
 	var verbose bool
 
 	root := &cobra.Command{
-		Use:           "tj",
-		Short:         "tj gives an engineer a session into a remote network over Tailscale SSH",
+		Use:   "tj",
+		Short: "Open a session into a remote network over Tailscale SSH",
+		Long: `tj opens a session into a remote network over Tailscale SSH.
+It forwards TCP, UDP, and ICMP echo through a TUN device on the client.
+The Session commands manage the session, and the Inspection commands find and check a remote.
+The Configuration commands manage the local config.`,
 		Version:       version.Version,
 		SilenceUsage:  true,
 		SilenceErrors: true,
@@ -88,18 +100,49 @@ func newRootCmd() *cobra.Command {
 	root.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "enable debug logging")
 	root.SetVersionTemplate("{{.Version}}\n")
 
+	// AddGroup must run before AddCommand, because cobra does not assign a
+	// group to a command that is already added.
+	root.AddGroup(
+		&cobra.Group{ID: groupSession, Title: "Session commands:"},
+		&cobra.Group{ID: groupInspect, Title: "Inspection commands:"},
+		&cobra.Group{ID: groupConfigure, Title: "Configuration commands:"},
+	)
+
+	connectCmd := newConnectCmd()
+	connectCmd.GroupID = groupSession
+	disconnectCmd := newDisconnectCmd()
+	disconnectCmd.GroupID = groupSession
+	statusCmd := newStatusCmd()
+	statusCmd.GroupID = groupSession
+	logsCmd := newLogsCmd()
+	logsCmd.GroupID = groupSession
+
+	listCmd := newListCmd()
+	listCmd.GroupID = groupInspect
+	describeCmd := newDescribeCmd()
+	describeCmd.GroupID = groupInspect
+	doctorCmd := newDoctorCmd()
+	doctorCmd.GroupID = groupInspect
+
+	aliasCmd := newAliasCmd()
+	aliasCmd.GroupID = groupConfigure
+	configCmd := newConfigCmd()
+	configCmd.GroupID = groupConfigure
+	setupCmd := newSetupCmd()
+	setupCmd.GroupID = groupConfigure
+
 	root.AddCommand(
 		newVersionCmd(),
-		newSetupCmd(),
-		newListCmd(),
-		newDescribeCmd(),
-		newDoctorCmd(),
-		newConnectCmd(),
-		newDisconnectCmd(),
-		newStatusCmd(),
-		newLogsCmd(),
-		newAliasCmd(),
-		newConfigCmd(),
+		setupCmd,
+		listCmd,
+		describeCmd,
+		doctorCmd,
+		connectCmd,
+		disconnectCmd,
+		statusCmd,
+		logsCmd,
+		aliasCmd,
+		configCmd,
 		newRemoteCmd(),
 		newSessionCmd(),
 	)

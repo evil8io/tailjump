@@ -337,6 +337,7 @@ A CLI write of `tj config` or `tj alias` replaces the whole file, so it drops th
 
 ### CLI conventions
 
+* `tj --help` groups the visible commands: Session commands `connect`, `disconnect`, `status`, `logs`; Inspection commands `list`, `describe`, `doctor`; Configuration commands `alias`, `config`, `setup`. `completion`, `help`, and `version` stay under Additional Commands.
 * Human output through `text/tabwriter`. `--json` on `list`, `describe`, `status`, `doctor`, and `connect --dry-run`.
 * Errors are one line on stderr, `Error: <message>`. The exit code:
 

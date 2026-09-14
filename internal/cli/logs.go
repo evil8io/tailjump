@@ -12,8 +12,14 @@ import (
 func newLogsCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "logs",
-		Short: "Print the log of the active or the last session",
-		Args:  cobra.NoArgs,
+		Short: "Print the session log",
+		Long: `tj logs prints the log of the active session, or the last session when none is active.
+-n/--lines sets the number of lines, 0 for all, and defaults to 100.
+-f/--follow keeps printing new lines until you stop the command.`,
+		Example: `  tj logs
+  tj logs -n 50
+  tj logs -f`,
+		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			lines, _ := cmd.Flags().GetInt("lines")
 			follow, _ := cmd.Flags().GetBool("follow")

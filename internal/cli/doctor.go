@@ -21,8 +21,15 @@ import (
 
 func newDoctorCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:               "doctor [remote]",
-		Short:             "Run the client checks, then the remote checks when a remote is given",
+		Use:   "doctor [remote]",
+		Short: "Check the client, then the remote",
+		Long: `tj doctor runs the client checks: the tj version, the tailnet status, the root copy, and the local DNS resolver.
+tj doctor <remote> adds the remote checks: the peer, SSH, discovery, and the manifest.
+It also checks the session networks, the DNS mode, the QUIC transport, and the echo socket.
+Each row is ok, fail, or info, and a fail row sets the exit code to 1.`,
+		Example: `  tj doctor
+  tj doctor gw.example
+  tj doctor tag:example --json`,
 		Args:              cobra.MaximumNArgs(1),
 		RunE:              runDoctor,
 		ValidArgsFunction: completeRemote,
