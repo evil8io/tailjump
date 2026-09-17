@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"text/tabwriter"
 	"time"
@@ -21,6 +22,14 @@ const (
 	benchMinDuration     = time.Second
 	benchMaxDuration     = 30 * time.Second
 	benchDefaultDuration = 5 * time.Second
+)
+
+// The time limit of the command: benchSetupTimeout for the SSH dial, the
+// discovery, the helper upload, and the transport, and benchLegGrace on top
+// of the duration for each direction.
+const (
+	benchSetupTimeout = 60 * time.Second
+	benchLegGrace     = 30 * time.Second
 )
 
 func newBenchCmd() *cobra.Command {
@@ -80,7 +89,9 @@ func runBench(cmd *cobra.Command, args []string) error {
 		return &ExitError{Code: 2, Err: err}
 	}
 
-	ctx := cmd.Context()
+	limit := benchSetupTimeout + 2*(duration+benchLegGrace)
+	ctx, cancel := context.WithTimeout(cmd.Context(), limit)
+	defer cancel()
 	cfg, err := loadLocalConfig()
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
@@ -97,10 +108,15 @@ func runBench(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("ssh dial %s: %w", rr.Peer.HostName, err)
 	}
 	defer func() { _ = client.Close() }()
+	// An SSH command reads no context. The close of the connection ends a
+	// command that the remote does not answer, at the time limit and at an
+	// interrupt.
+	stop := context.AfterFunc(ctx, func() { _ = client.Close() })
+	defer stop()
 
 	res, err := runDiscovery(client)
 	if err != nil {
-		return fmt.Errorf("discovery: %w", err)
+		return benchTimeout(ctx, limit, fmt.Errorf("discovery: %w", err))
 	}
 	arch, err := helper.ArchForUname(res.UnameM)
 	if err != nil {
@@ -122,9 +138,18 @@ func runBench(cmd *cobra.Command, args []string) error {
 	path := benchPath(ctx, tc, rr)
 	report, err := session.Bench(ctx, client, arch, rr.Addr, transportMode(transportFlag, cfg, args[0]), ports, duration)
 	if err != nil {
-		return err
+		return benchTimeout(ctx, limit, err)
 	}
 	return printBench(cmd, benchReport(rr, path, report), asJSON)
+}
+
+// benchTimeout names the time limit when it ended the command, because the
+// error of the closed connection does not.
+func benchTimeout(ctx context.Context, limit time.Duration, err error) error {
+	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		return fmt.Errorf("the remote did not answer within %s: %w", limit, err)
+	}
+	return err
 }
 
 // checkBenchDuration accepts the range the helper accepts.
