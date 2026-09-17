@@ -67,6 +67,27 @@ func TestParseRate(t *testing.T) {
 	}
 }
 
+func TestFormatRate(t *testing.T) {
+	cases := []struct {
+		in   uint64
+		want string
+	}{
+		{0, "0 bps"},
+		{1, "8 bps"},
+		{125, "1.0 kbps"},
+		{118_750, "950 kbps"},
+		{150_000, "1.2 mbps"},
+		{2_500_000, "20 mbps"},
+		{26_550_000, "212 mbps"},
+		{125_000_000, "1.0 gbps"},
+	}
+	for _, c := range cases {
+		if got := FormatRate(c.in); got != c.want {
+			t.Fatalf("FormatRate(%d) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
+
 func TestController(t *testing.T) {
 	if got := ControllerFor(0); got.String() != "bbr" {
 		t.Fatalf("ControllerFor(0) = %q", got)
