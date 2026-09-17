@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.8.0](https://github.com/evil8io/tailjump/compare/v1.7.0...v1.8.0) (2026-09-17)
+
+
+### Features
+
+* **bench:** add tj bench for the capacity of the path ([#37](https://github.com/evil8io/tailjump/issues/37)) ([11d4f9d](https://github.com/evil8io/tailjump/commit/11d4f9d4c743c0331953ec2d788650e853b1a397))
+* **status:** show the latency, the rtt, and the traffic of the session ([#36](https://github.com/evil8io/tailjump/issues/36)) ([5c3696d](https://github.com/evil8io/tailjump/commit/5c3696db0e50daa3fe647cb0053f710e308486aa))
+
 ## [1.7.0](https://github.com/evil8io/tailjump/compare/v1.6.0...v1.7.0) (2026-09-14)
 
 
