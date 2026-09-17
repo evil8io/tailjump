@@ -131,6 +131,24 @@ func ParseRate(s string) (uint64, error) {
 	return n * mult / 8, nil
 }
 
+// FormatRate prints a rate in bytes per second with the units of ParseRate,
+// for example "20 mbps". A value below 10 keeps one decimal.
+func FormatRate(bytesPerSecond uint64) string {
+	bits := float64(bytesPerSecond) * 8
+	unit, div := "bps", 1.0
+	for _, u := range []string{"kbps", "mbps", "gbps", "tbps"} {
+		if bits < float64(rateUnits[u]) {
+			break
+		}
+		unit, div = u, float64(rateUnits[u])
+	}
+	v := bits / div
+	if v < 9.95 && unit != "bps" {
+		return fmt.Sprintf("%.1f %s", v, unit)
+	}
+	return fmt.Sprintf("%.0f %s", v, unit)
+}
+
 // Controller names the congestion controller of one sender. Bps is the
 // Brutal rate in bytes per second and zero for BBR.
 type Controller struct {

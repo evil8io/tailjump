@@ -45,3 +45,21 @@ func TestSSHUserFallsBackToLocalUser(t *testing.T) {
 		t.Fatal("want a non-empty fallback user")
 	}
 }
+
+func TestFormatBytes(t *testing.T) {
+	cases := []struct {
+		in   uint64
+		want string
+	}{
+		{0, "0 B"},
+		{1023, "1023 B"},
+		{1024, "1.0 KiB"},
+		{325_058_560, "310 MiB"},
+		{2_254_857_830, "2.1 GiB"},
+	}
+	for _, c := range cases {
+		if got := formatBytes(c.in); got != c.want {
+			t.Fatalf("formatBytes(%d) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
