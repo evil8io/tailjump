@@ -110,6 +110,9 @@ remote's operator accepts as a fixed send rate: Brutal sends at that rate and
 compensates loss, which is unfair on a shared relay. Without it, BBR measures
 the path.
 
+`tj bench <remote>` measures the path with BBR, up and then down, and prints
+the rates in this notation.
+
 ## Checks
 
 Each entry in `checks` names a TCP endpoint. `tj doctor <remote>` dials
