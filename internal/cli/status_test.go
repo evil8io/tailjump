@@ -50,7 +50,7 @@ func TestWriteStatusPrintsTheMetrics(t *testing.T) {
 		"RTT:",
 		"31ms",
 		"Traffic:",
-		"up 1.2 mbps, down 8.4 mbps (310 MiB up, 2.1 GiB down)",
+		"up 1200 kbps, down 8400 kbps (310 MiB up, 2.1 GiB down)",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("status has no %q:\n%s", want, out)

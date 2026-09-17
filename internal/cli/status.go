@@ -95,7 +95,7 @@ func formatRTT(ms float64) string {
 }
 
 // trafficLine is the rates and the totals of the session, for example
-// "up 1.2 mbps, down 8.4 mbps (310 MiB up, 2.1 GiB down)".
+// "up 1200 kbps, down 8400 kbps (310 MiB up, 2.1 GiB down)".
 func trafficLine(m *session.Metrics) string {
 	return fmt.Sprintf("up %s, down %s (%s up, %s down)",
 		transport.FormatRate(m.UpRate), transport.FormatRate(m.DownRate),
