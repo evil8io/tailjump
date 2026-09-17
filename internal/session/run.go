@@ -188,10 +188,13 @@ type runner struct {
 	laneClosed <-chan string
 
 	// The watches of the current transport. resumeLoss carries the loss the
-	// resume detector finds.
-	stopWatch  func()
-	stopResume func()
-	resumeLoss chan string
+	// resume detector finds, and samples the measurements of the metrics
+	// sampler.
+	stopWatch   func()
+	stopResume  func()
+	stopMetrics func()
+	resumeLoss  chan string
+	samples     <-chan Metrics
 
 	// lostAt is the start of the reconnect window.
 	lostAt time.Time
@@ -307,11 +310,12 @@ func newRunner(plat platform.Platform, plan *Plan, addr netip.Addr, set protocol
 			Status:    StatusStarting,
 			Protocols: set.String(),
 		},
-		dialer:     &switchDialer{},
-		addr:       addr,
-		hostname:   plan.Remote,
-		stopWatch:  func() {},
-		stopResume: func() {},
+		dialer:      &switchDialer{},
+		addr:        addr,
+		hostname:    plan.Remote,
+		stopWatch:   func() {},
+		stopResume:  func() {},
+		stopMetrics: func() {},
 	}
 }
 
@@ -461,18 +465,26 @@ func (r *runner) loop(ctx context.Context) error {
 // selects on the channels of the current transport only: a close fires the
 // channels of the transport it closes, so an old one would report a loss the
 // session already handled.
+//
+// A metrics sample is no end: this goroutine stores it and writes the state
+// file, because it is the only writer of the state, and then waits again.
 func (r *runner) wait(ctx context.Context) (lossEvent, bool) {
-	select {
-	case <-ctx.Done():
-		return lossEvent{}, false
-	case <-r.muxWait:
-		return lossEvent{reason: "mux closed"}, true
-	case lane := <-r.laneClosed:
-		return lossEvent{reason: fmt.Sprintf("lane mux closed (%s)", lane), lane: lane}, true
-	case <-r.quicWait:
-		return lossEvent{reason: "quic connection closed"}, true
-	case reason := <-r.resumeLoss:
-		return lossEvent{reason: reason}, true
+	for {
+		select {
+		case <-ctx.Done():
+			return lossEvent{}, false
+		case <-r.muxWait:
+			return lossEvent{reason: "mux closed"}, true
+		case lane := <-r.laneClosed:
+			return lossEvent{reason: fmt.Sprintf("lane mux closed (%s)", lane), lane: lane}, true
+		case <-r.quicWait:
+			return lossEvent{reason: "quic connection closed"}, true
+		case reason := <-r.resumeLoss:
+			return lossEvent{reason: reason}, true
+		case m := <-r.samples:
+			r.state.Metrics = &m
+			r.writeState()
+		}
 	}
 }
 
@@ -528,6 +540,7 @@ func (r *runner) stopSession() {
 	r.writeState()
 	r.stopWatch()
 	r.stopResume()
+	r.stopMetrics()
 	revertDNS(r.plat, r.device)
 	removeRoutes(r.plat, r.device, r.routes)
 	resetRoutes(r.plat)

@@ -72,6 +72,23 @@ type ReconnectState struct {
 	Reason string `json:"reason"`
 }
 
+// Metrics is the live measurement of the session. The session writes it on
+// an interval, and tj status prints it.
+type Metrics struct {
+	// UpdatedAt is the RFC 3339 time of the sample.
+	UpdatedAt string `json:"updated_at"`
+	// RTTMS is the mean round-trip time of the probes of the last interval,
+	// in milliseconds. It is absent when no probe answered.
+	RTTMS float64 `json:"rtt_ms,omitempty"`
+	// UpBytes and DownBytes are the totals since the session start.
+	UpBytes   uint64 `json:"up_bytes"`
+	DownBytes uint64 `json:"down_bytes"`
+	// UpRate and DownRate are the bytes per second of the last interval, the
+	// unit of Plan.BandwidthUp.
+	UpRate   uint64 `json:"up_rate"`
+	DownRate uint64 `json:"down_rate"`
+}
+
 // State is the JSON that the running session writes for tj status.
 type State struct {
 	Remote string `json:"remote"`
@@ -100,4 +117,7 @@ type State struct {
 	// Reconnects counts the losses the session recovered from. It survives a
 	// reconnect, so tj status reports the whole session.
 	Reconnects int `json:"reconnects,omitempty"`
+	// Metrics is the last sample of the session. A state file that an older
+	// session wrote has none.
+	Metrics *Metrics `json:"metrics,omitempty"`
 }
