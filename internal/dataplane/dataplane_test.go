@@ -5,9 +5,12 @@ import (
 	"context"
 	"net"
 	"net/netip"
+	"os"
+	"sync"
 	"testing"
 	"time"
 
+	"golang.zx2c4.com/wireguard/tun"
 	"gvisor.dev/gvisor/pkg/buffer"
 	"gvisor.dev/gvisor/pkg/tcpip"
 	"gvisor.dev/gvisor/pkg/tcpip/adapters/gonet"
@@ -257,6 +260,109 @@ func TestLoopbackUDPv4(t *testing.T) {
 	}
 	if !bytes.Equal(got[:n], want) {
 		t.Fatalf("echo = %q, want %q", got[:n], want)
+	}
+}
+
+// pumpDevice is the TUN device of the counter test: Read returns the packets
+// the test queues, and Write reports the packets the pumps write.
+type pumpDevice struct {
+	in     chan []byte
+	out    chan []byte
+	closed chan struct{}
+	once   sync.Once
+}
+
+func newPumpDevice() *pumpDevice {
+	return &pumpDevice{
+		in:     make(chan []byte, 4),
+		out:    make(chan []byte, 4),
+		closed: make(chan struct{}),
+	}
+}
+
+func (d *pumpDevice) Read(bufs [][]byte, sizes []int, offset int) (int, error) {
+	select {
+	case pkt := <-d.in:
+		sizes[0] = copy(bufs[0][offset:], pkt)
+		return 1, nil
+	case <-d.closed:
+		return 0, os.ErrClosed
+	}
+}
+
+func (d *pumpDevice) Write(bufs [][]byte, offset int) (int, error) {
+	for _, b := range bufs {
+		select {
+		case d.out <- append([]byte(nil), b[offset:]...):
+		case <-d.closed:
+			return 0, os.ErrClosed
+		}
+	}
+	return len(bufs), nil
+}
+
+func (d *pumpDevice) MTU() (int, error)        { return testMTU, nil }
+func (d *pumpDevice) Name() (string, error)    { return "tjtest0", nil }
+func (d *pumpDevice) Events() <-chan tun.Event { return nil }
+func (d *pumpDevice) BatchSize() int           { return 1 }
+func (d *pumpDevice) File() *os.File           { return nil }
+
+func (d *pumpDevice) Close() error {
+	d.once.Do(func() { close(d.closed) })
+	return nil
+}
+
+// TestCountersGrow runs the pumps over a device the test feeds and checks
+// that both counters follow the packets. The set has no udp, so the netstack
+// answers the datagram with a port unreachable and the test needs no helper.
+func TestCountersGrow(t *testing.T) {
+	dev := newPumpDevice()
+	dp, err := New(dev, nil, testMTU, protocols.Set{TCP: true, ICMP: true})
+	if err != nil {
+		t.Fatalf("data plane: %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	dp.Run(ctx)
+	t.Cleanup(func() {
+		_ = dp.Close()
+		dp.Wait()
+	})
+
+	pkt := innerUDP(netip.AddrPortFrom(sourceV4, 40000), netip.AddrPortFrom(pingedV4, 33434), 5, []byte("probe"))
+	dev.in <- pkt
+
+	var reply []byte
+	select {
+	case reply = <-dev.out:
+	case <-time.After(10 * time.Second):
+		t.Fatal("no packet written to the device within 10s, want a port unreachable")
+	}
+
+	up, down := waitCounters(t, dp)
+	if up != uint64(len(pkt)) {
+		t.Errorf("up = %d, want %d", up, len(pkt))
+	}
+	if down != uint64(len(reply)) {
+		t.Errorf("down = %d, want %d", down, len(reply))
+	}
+}
+
+// waitCounters polls until both counters are above zero. The write pump adds
+// to down after the device write returns, so the test can read the packet
+// before the counter has it.
+func waitCounters(t *testing.T, dp *DataPlane) (up, down uint64) {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		up, down = dp.Counters()
+		if up > 0 && down > 0 {
+			return up, down
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("counters = up %d, down %d, want both above zero", up, down)
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 }
 
