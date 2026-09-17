@@ -74,16 +74,24 @@ func TestFormatRate(t *testing.T) {
 	}{
 		{0, "0 bps"},
 		{1, "8 bps"},
-		{125, "1.0 kbps"},
+		{125, "1000 bps"},
 		{118_750, "950 kbps"},
-		{150_000, "1.2 mbps"},
+		{150_000, "1200 kbps"},
 		{2_500_000, "20 mbps"},
 		{26_550_000, "212 mbps"},
-		{125_000_000, "1.0 gbps"},
+		{150_000_000, "1200 mbps"},
+		{2_500_000_000, "20 gbps"},
 	}
 	for _, c := range cases {
-		if got := FormatRate(c.in); got != c.want {
+		got := FormatRate(c.in)
+		if got != c.want {
 			t.Fatalf("FormatRate(%d) = %q, want %q", c.in, got, c.want)
+		}
+		if c.in == 0 {
+			continue
+		}
+		if _, err := ParseRate(got); err != nil {
+			t.Fatalf("ParseRate(FormatRate(%d)): %v", c.in, err)
 		}
 	}
 }
