@@ -29,6 +29,11 @@ type DataPlane struct {
 	dev tun.Device
 	ns  *netStack
 
+	// up and down are the bytes of the IP packets the pumps carried, without
+	// the headroom of the device buffers.
+	up   atomic.Uint64
+	down atomic.Uint64
+
 	closed atomic.Bool
 	wg     sync.WaitGroup
 }
@@ -72,6 +77,13 @@ func (d *DataPlane) Wait() {
 	d.wg.Wait()
 }
 
+// Counters returns the bytes the session sent to the remote and the bytes it
+// received, since the data plane started. Both survive a reconnect, because
+// the data plane does.
+func (d *DataPlane) Counters() (up, down uint64) {
+	return d.up.Load(), d.down.Load()
+}
+
 // tunToStack reads packets from the device in batches and injects each into
 // the netstack. An ICMP echo request goes to its own flow instead, because
 // the netstack has no forwarder for it.
@@ -96,6 +108,7 @@ func (d *DataPlane) tunToStack() {
 			if !ok {
 				continue
 			}
+			d.up.Add(uint64(sizes[i]))
 			if d.ns.captureEcho(pkt) {
 				continue
 			}
@@ -125,12 +138,14 @@ func (d *DataPlane) stackToTun(ctx context.Context) {
 		}
 		out = out[:0]
 		n := 0
+		var down uint64
 		for {
 			view := pb.ToView()
 			size := copy(bufs[n][tunOffset:], view.AsSlice())
 			view.Release()
 			pb.DecRef()
 			out = append(out, bufs[n][:tunOffset+size])
+			down += uint64(size)
 			n++
 			if n == batch {
 				break
@@ -146,6 +161,7 @@ func (d *DataPlane) stackToTun(ctx context.Context) {
 			}
 			return
 		}
+		d.down.Add(down)
 	}
 }
 

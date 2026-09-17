@@ -37,6 +37,10 @@ func PlanPath(runtimeDir string) string { return filepath.Join(runtimeDir, planF
 // StatePath is the state file under the runtime directory.
 func StatePath(runtimeDir string) string { return filepath.Join(runtimeDir, stateFile) }
 
+// stateTempPath is the file writeState renames over the state file. The
+// session is the only writer of the state, so one fixed name is enough.
+func stateTempPath(path string) string { return path + ".tmp" }
+
 // Marshal encodes a plan as JSON.
 func (p *Plan) Marshal() ([]byte, error) { return json.Marshal(p) }
 
@@ -66,7 +70,9 @@ func ReadPlan(path string) (*Plan, error) {
 }
 
 // writeState writes the state file with 0644, so tj status reads it without
-// root.
+// root. It writes a temp file next to it and renames it over the state file,
+// because a reader polls the file while the session writes it, and a
+// truncating write would give that reader a partial document.
 func writeState(path string, st *State) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return fmt.Errorf("create runtime dir: %w", err)
@@ -75,7 +81,12 @@ func writeState(path string, st *State) error {
 	if err != nil {
 		return err
 	}
-	if err := os.WriteFile(path, b, 0o644); err != nil {
+	tmp := stateTempPath(path)
+	if err := os.WriteFile(tmp, b, 0o644); err != nil {
+		return fmt.Errorf("write state: %w", err)
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		_ = os.Remove(tmp)
 		return fmt.Errorf("write state: %w", err)
 	}
 	return nil

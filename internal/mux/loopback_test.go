@@ -180,6 +180,12 @@ func TestClientPing(t *testing.T) {
 	if err := client.Ping(context.Background()); err != nil {
 		t.Fatalf("Ping on an open session: %v", err)
 	}
+	switch rtt, err := client.RTT(context.Background()); {
+	case err != nil:
+		t.Fatalf("RTT on an open session: %v", err)
+	case rtt <= 0:
+		t.Fatalf("RTT = %s, want a measured round trip", rtt)
+	}
 
 	if err := c2.Close(); err != nil {
 		t.Fatalf("close the peer: %v", err)

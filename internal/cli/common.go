@@ -178,6 +178,22 @@ func addrStrings(addrs []netip.Addr) []string {
 	return out
 }
 
+// formatBytes prints a byte count with a binary unit, for example "310 MiB".
+// A value below 10 keeps one decimal.
+func formatBytes(n uint64) string {
+	v, unit := float64(n), "B"
+	for _, u := range []string{"KiB", "MiB", "GiB", "TiB"} {
+		if v < 1024 {
+			break
+		}
+		v, unit = v/1024, u
+	}
+	if v < 9.95 && unit != "B" {
+		return fmt.Sprintf("%.1f %s", v, unit)
+	}
+	return fmt.Sprintf("%.0f %s", v, unit)
+}
+
 // clientConnected returns the client's connected subnets. Router.Connected
 // is not implemented yet in this chunk (a later chunk fills in the
 // platform Router), so a "not implemented" error is not fatal here: the

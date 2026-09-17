@@ -83,6 +83,10 @@ Exit codes:
 A session reconnects after a loss for `reconnect_for`, default 10 minutes.
 `--reconnect-for 0` turns the reconnect off. `tj status` shows the reconnect.
 
+`tj status` also shows the latency of the path, the round-trip time of the
+transport, and the traffic of the session. These rows follow the first
+metrics sample, about a second after the session comes up.
+
 `tj` completes remotes, aliases, config keys, and flag values. Install the
 completion script for your shell.
 

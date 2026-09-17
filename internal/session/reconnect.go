@@ -202,12 +202,19 @@ func (r *runner) lost(reason string) {
 	r.dialer.clear()
 	r.stopWatch()
 	r.stopResume()
+	r.stopMetrics()
 	r.dropTransport()
 	revertDNS(r.plat, r.device)
 	r.state.Status = StatusReconnecting
 	r.state.Reconnect = &ReconnectState{
 		Since:  r.lostAt.UTC().Format(time.RFC3339),
 		Reason: reason,
+	}
+	// The session moves no traffic while it reconnects, and it has no
+	// transport to probe. The totals stay, because the data plane stays.
+	if m := r.state.Metrics; m != nil {
+		m.UpdatedAt = r.lostAt.UTC().Format(time.RFC3339)
+		m.RTTMS, m.UpRate, m.DownRate = 0, 0, 0
 	}
 	r.writeState()
 }
@@ -320,11 +327,14 @@ func (r *runner) guardManifest(client *sshc.Client) error {
 	return nil
 }
 
-// startWatches starts the flap watch and the resume detector of the current
-// transport. The resume detector runs with a reconnect window only: without
-// one, a failed probe would end a session that no other signal calls lost.
+// startWatches starts the flap watch, the metrics sampler, and the resume
+// detector of the current transport. The resume detector runs with a
+// reconnect window only: without one, a failed probe would end a session that
+// no other signal calls lost. The sampler runs in both cases, because a
+// failed probe is no loss signal there.
 func (r *runner) startWatches(ctx context.Context) {
 	r.stopWatch = watchTransportPath(ctx, r.addr)
+	r.stopMetrics = r.startMetrics(ctx)
 	r.stopResume = func() {}
 	if r.plan.ReconnectFor <= 0 {
 		return

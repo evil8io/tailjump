@@ -107,6 +107,25 @@ func (q *QUICClient) Probe(ctx context.Context) error {
 	return nil
 }
 
+// RTT runs one probe and returns the time it took: a stream open, the kind
+// byte, and the helper's status byte. The read of a probe ends at the
+// deadline of ctx only, so RTT runs the probe in a goroutine and returns
+// ctx.Err() when the context ends first.
+func (q *QUICClient) RTT(ctx context.Context) (time.Duration, error) {
+	start := time.Now()
+	ch := make(chan error, 1)
+	go func() { ch <- q.Probe(ctx) }()
+	select {
+	case err := <-ch:
+		if err != nil {
+			return 0, err
+		}
+		return time.Since(start), nil
+	case <-ctx.Done():
+		return 0, ctx.Err()
+	}
+}
+
 // Port returns the helper's listener port.
 func (q *QUICClient) Port() uint16 {
 	return q.port
