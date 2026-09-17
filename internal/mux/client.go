@@ -76,22 +76,32 @@ func (c *Client) Wait() <-chan struct{} {
 	return c.sess.CloseChan()
 }
 
-// Ping sends one yamux ping on the session and returns the error, nil on a
-// completed round trip. Session.Ping blocks up to the yamux connection write
-// timeout, so Ping runs it in a goroutine and returns ctx.Err() when the
-// context ends first.
-func (c *Client) Ping(ctx context.Context) error {
-	ch := make(chan error, 1)
+// RTT sends one yamux ping on the session and returns the round-trip time.
+// Session.Ping blocks up to the yamux connection write timeout, so RTT runs
+// it in a goroutine and returns ctx.Err() when the context ends first.
+func (c *Client) RTT(ctx context.Context) (time.Duration, error) {
+	type pong struct {
+		rtt time.Duration
+		err error
+	}
+	ch := make(chan pong, 1)
 	go func() {
-		_, err := c.sess.Ping()
-		ch <- err
+		rtt, err := c.sess.Ping()
+		ch <- pong{rtt, err}
 	}()
 	select {
-	case err := <-ch:
-		return err
+	case p := <-ch:
+		return p.rtt, p.err
 	case <-ctx.Done():
-		return ctx.Err()
+		return 0, ctx.Err()
 	}
+}
+
+// Ping sends one yamux ping on the session and returns the error, nil on a
+// completed round trip.
+func (c *Client) Ping(ctx context.Context) error {
+	_, err := c.RTT(ctx)
+	return err
 }
 
 // Quit asks the helper to exit. The helper acts on quit at once and tears the

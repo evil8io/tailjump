@@ -107,6 +107,16 @@ func (q *QUICClient) Probe(ctx context.Context) error {
 	return nil
 }
 
+// RTT runs one probe and returns the time it took: a stream open, the kind
+// byte, and the helper's status byte.
+func (q *QUICClient) RTT(ctx context.Context) (time.Duration, error) {
+	start := time.Now()
+	if err := q.Probe(ctx); err != nil {
+		return 0, err
+	}
+	return time.Since(start), nil
+}
+
 // Port returns the helper's listener port.
 func (q *QUICClient) Port() uint16 {
 	return q.port
