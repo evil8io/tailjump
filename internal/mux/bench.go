@@ -237,7 +237,7 @@ func readBenchRequest(r io.Reader) (BenchDirection, time.Duration, error) {
 // handleBench serves a bench stream. An invalid request gets the other
 // status and a close.
 func (s *Server) handleBench(stream Stream) {
-	defer func() { _ = stream.Close() }()
+	defer releaseStream(stream)
 	dir, d, err := readBenchRequest(stream)
 	if err != nil {
 		s.logf("bench request: %v", err)
