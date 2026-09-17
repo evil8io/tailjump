@@ -1,7 +1,9 @@
 package session
 
 import (
+	"errors"
 	"net/netip"
+	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -72,6 +74,43 @@ func TestStateRoundTrip(t *testing.T) {
 	}
 	if !reflect.DeepEqual(got, st) {
 		t.Fatalf("round trip mismatch:\n got %+v\nwant %+v", got, st)
+	}
+}
+
+// TestWriteStateRenames checks the file the readers see: mode 0644, the
+// state of the last write, and no temp file left behind.
+func TestWriteStateRenames(t *testing.T) {
+	dir := t.TempDir()
+	path := StatePath(dir)
+	st := &State{
+		Remote:    "gw.example",
+		StartedAt: "2026-09-11T10:00:00Z",
+		Status:    StatusStarting,
+	}
+	if err := writeState(path, st); err != nil {
+		t.Fatalf("write state: %v", err)
+	}
+	st.Status = StatusUp
+	if err := writeState(path, st); err != nil {
+		t.Fatalf("write state again: %v", err)
+	}
+
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat state: %v", err)
+	}
+	if perm := info.Mode().Perm(); perm != 0o644 {
+		t.Errorf("state mode = %v, want 0644", perm)
+	}
+	got, err := ReadState(path)
+	if err != nil {
+		t.Fatalf("read state: %v", err)
+	}
+	if !reflect.DeepEqual(got, st) {
+		t.Errorf("state:\n got %+v\nwant %+v", got, st)
+	}
+	if _, err := os.Stat(stateTempPath(path)); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("want no temp file, got err=%v", err)
 	}
 }
 

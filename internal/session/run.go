@@ -257,7 +257,10 @@ func Run(ctx context.Context, planPath string) (err error) {
 	if err := writeState(r.statePath, r.state); err != nil {
 		return err
 	}
-	defer func() { _ = os.Remove(r.statePath) }()
+	defer func() {
+		_ = os.Remove(r.statePath)
+		_ = os.Remove(stateTempPath(r.statePath))
+	}()
 
 	// A stale device from a prior crash would block the create.
 	_ = plat.Device.Delete(deviceName)
@@ -616,6 +619,9 @@ func cleanup(plat platform.Platform) error {
 
 	if err := os.Remove(statePath); err != nil && !errors.Is(err, os.ErrNotExist) {
 		slog.Warn("cleanup: remove state file", "error", err)
+	}
+	if err := os.Remove(stateTempPath(statePath)); err != nil && !errors.Is(err, os.ErrNotExist) {
+		slog.Warn("cleanup: remove the state temp file", "error", err)
 	}
 	if err := os.Remove(PlanPath(runtimeDir)); err != nil && !errors.Is(err, os.ErrNotExist) {
 		slog.Warn("cleanup: remove plan file", "error", err)
