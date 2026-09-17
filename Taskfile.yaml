@@ -56,6 +56,10 @@ tasks:
     desc: Run the interrupted-session cleanup test in the rig.
     cmds:
       - bash test/e2e/crash.sh
+  e2e:bench:
+    desc: Run the tj bench end-to-end test in the rig.
+    cmds:
+      - bash test/e2e/bench.sh
   e2e:loss:
     desc: Run the loss job in the rig; see docs/spikes/06-loss-test.md for the knobs.
     cmds:

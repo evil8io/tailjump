@@ -95,6 +95,8 @@ func (s *Server) handle(stream Stream, stop func()) {
 		s.handleUDP(stream)
 	case kindICMP:
 		s.handleICMP(stream)
+	case kindBench:
+		s.handleBench(stream)
 	default:
 		_ = stream.Close()
 	}
@@ -117,6 +119,8 @@ func (s *Server) handleFlow(stream Stream) {
 		s.handleICMP(stream)
 	case kindProbe:
 		s.handleProbe(stream)
+	case kindBench:
+		s.handleBench(stream)
 	default:
 		_ = stream.Close()
 	}

@@ -123,6 +123,8 @@ The Configuration commands manage the local config.`,
 	describeCmd.GroupID = groupInspect
 	doctorCmd := newDoctorCmd()
 	doctorCmd.GroupID = groupInspect
+	benchCmd := newBenchCmd()
+	benchCmd.GroupID = groupInspect
 
 	aliasCmd := newAliasCmd()
 	aliasCmd.GroupID = groupConfigure
@@ -137,6 +139,7 @@ The Configuration commands manage the local config.`,
 		listCmd,
 		describeCmd,
 		doctorCmd,
+		benchCmd,
 		connectCmd,
 		disconnectCmd,
 		statusCmd,

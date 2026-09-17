@@ -58,6 +58,7 @@ A `go install` build embeds no helper, so it serves the read-only commands only.
 ```
 tj setup
 tj list --path
+tj bench <remote>
 tj connect <remote> --dns split --protocols tcp,udp,icmp
 tj status
 tj logs
@@ -69,7 +70,11 @@ lists every command in its group. `tj connect --dry-run` prints the plan for
 a remote and starts no session.
 
 `--json` prints machine output on `list`, `describe`, `status`, `doctor`,
-and `connect --dry-run`.
+`bench`, and `connect --dry-run`.
+
+`tj bench <remote>` measures the throughput of the transport to a remote, up
+and then down, without a session. Its rates are the values for
+`transport.bandwidth` in the remote's manifest.
 
 Exit codes:
 
