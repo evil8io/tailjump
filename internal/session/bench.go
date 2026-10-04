@@ -35,7 +35,7 @@ type benchDialer interface {
 // would select Brutal, and the run would then measure the configured rate
 // instead of the path.
 func Bench(ctx context.Context, client *sshc.Client, arch string, addr netip.Addr, mode transport.Mode, ports transport.PortRange, d time.Duration) (BenchReport, error) {
-	muxClient, _, err := startHelper(client, arch)
+	muxClient, _, err := startHelper(ctx, client, arch)
 	if err != nil {
 		return BenchReport{}, err
 	}

@@ -31,6 +31,12 @@ const uploadScript = `d="${XDG_RUNTIME_DIR:-$HOME/.cache/tj}"; mkdir -p "$d" && 
 // upTimeout bounds the wait for the session to report status up.
 const upTimeout = 60 * time.Second
 
+// helperUploadTimeout bounds the helper upload: a normal upload takes under
+// 5 s, and a stalled Tailscale path once kept one open for 22 minutes.
+const helperUploadTimeout = 30 * time.Second
+
+var errHelperUploadTimeout = fmt.Errorf("upload helper: no completion within %s", helperUploadTimeout)
+
 // cancelStopTimeout bounds the wait for the unit to stop after a cancelled
 // connect.
 const cancelStopTimeout = 25 * time.Second
@@ -335,7 +341,7 @@ func (r *runner) transport(ctx context.Context) error {
 		return err
 	}
 
-	muxClient, helperPath, err := startHelper(client, r.plan.HelperArch)
+	muxClient, helperPath, err := startHelper(ctx, client, r.plan.HelperArch)
 	if err != nil {
 		_ = client.Close()
 		return err
@@ -646,12 +652,12 @@ func cleanup(plat platform.Platform) error {
 // startHelper uploads the helper for the remote's architecture, starts it,
 // opens the mux over its stdin and stdout, and returns the uploaded path. The
 // extra lanes start their own helper from that same file.
-func startHelper(client *sshc.Client, arch string) (*mux.Client, string, error) {
+func startHelper(ctx context.Context, client *sshc.Client, arch string) (*mux.Client, string, error) {
 	helperBytes, err := embed.Helper(arch)
 	if err != nil {
 		return nil, "", err
 	}
-	helperPath, err := uploadHelper(client, helperBytes)
+	helperPath, err := uploadHelper(ctx, client, helperBytes)
 	if err != nil {
 		return nil, "", err
 	}
@@ -690,9 +696,14 @@ func unlinkHelper(muxClient *mux.Client) {
 	}
 }
 
-func uploadHelper(client *sshc.Client, body []byte) (string, error) {
-	out, err := client.Run(uploadScript, body)
+func uploadHelper(ctx context.Context, client *sshc.Client, body []byte) (string, error) {
+	ctx, cancel := context.WithTimeoutCause(ctx, helperUploadTimeout, errHelperUploadTimeout)
+	defer cancel()
+	out, err := client.RunContext(ctx, uploadScript, body)
 	if err != nil {
+		if cause := context.Cause(ctx); errors.Is(cause, errHelperUploadTimeout) {
+			return "", cause
+		}
 		return "", fmt.Errorf("upload helper: %w", err)
 	}
 	path := strings.TrimSpace(string(out))

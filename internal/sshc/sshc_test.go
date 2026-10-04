@@ -2,11 +2,17 @@ package sshc
 
 import (
 	"context"
+	"crypto/ed25519"
+	"crypto/rand"
+	"errors"
+	"net"
 	"net/netip"
 	"os"
 	"os/user"
 	"testing"
 	"time"
+
+	"golang.org/x/crypto/ssh"
 )
 
 // testRemote reads the real gateway address from TJ_TEST_REMOTE and skips
@@ -129,5 +135,95 @@ func TestExecRoundTrip(t *testing.T) {
 	}
 	if string(buf[:n]) != "ping\n" {
 		t.Fatalf("want ping echoed back, got %q", buf[:n])
+	}
+}
+
+// stallClient returns a Client on an SSH server that accepts every exec
+// request and then neither reads stdin nor exits, so a command on it never
+// completes. The server is in-process, on the loopback.
+func stallClient(t *testing.T) *Client {
+	t.Helper()
+	_, key, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("generate host key: %v", err)
+	}
+	signer, err := ssh.NewSignerFromKey(key)
+	if err != nil {
+		t.Fatalf("host key signer: %v", err)
+	}
+	cfg := &ssh.ServerConfig{NoClientAuth: true}
+	cfg.AddHostKey(signer)
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	t.Cleanup(func() { _ = ln.Close() })
+	go func() {
+		for {
+			nc, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			go serveStall(nc, cfg)
+		}
+	}()
+
+	conn, err := ssh.Dial("tcp", ln.Addr().String(), &ssh.ClientConfig{
+		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
+		Timeout:         DialTimeout,
+	})
+	if err != nil {
+		t.Fatalf("dial the stall server: %v", err)
+	}
+	c := &Client{conn: conn, hostname: "stall", closeCh: make(chan struct{})}
+	t.Cleanup(func() { _ = c.Close() })
+	return c
+}
+
+func serveStall(nc net.Conn, cfg *ssh.ServerConfig) {
+	conn, chans, reqs, err := ssh.NewServerConn(nc, cfg)
+	if err != nil {
+		return
+	}
+	defer func() { _ = conn.Close() }()
+	go ssh.DiscardRequests(reqs)
+	for newCh := range chans {
+		_, chReqs, err := newCh.Accept()
+		if err != nil {
+			continue
+		}
+		go func() {
+			for req := range chReqs {
+				if req.WantReply {
+					_ = req.Reply(req.Type == "exec", nil)
+				}
+			}
+		}()
+	}
+}
+
+func TestRunContextDeadlineClosesTheConnection(t *testing.T) {
+	c := stallClient(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+
+	// 4 MiB exceeds the 2 MiB channel window, so the stdin copy blocks until
+	// the server reads, which it never does.
+	start := time.Now()
+	_, err := c.RunContext(ctx, "cat", make([]byte, 4<<20))
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("want a deadline error, got %v", err)
+	}
+	if d := time.Since(start); d > 5*time.Second {
+		t.Fatalf("RunContext returned after %s, want it within the limit", d)
+	}
+
+	closed := make(chan error, 1)
+	go func() { closed <- c.conn.Wait() }()
+	select {
+	case <-closed:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the connection is still open after the deadline")
 	}
 }

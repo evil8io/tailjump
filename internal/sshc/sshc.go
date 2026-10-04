@@ -132,10 +132,24 @@ func (c *Client) Close() error {
 
 // Run executes cmd (run as /bin/bash -c by Tailscale SSH), feeds stdin, and
 // collects stdout. A non-zero exit returns an error that wraps
-// *ssh.ExitError.
+// *ssh.ExitError. Run waits without a limit; RunContext bounds the wait.
 func (c *Client) Run(cmd string, stdin []byte) ([]byte, error) {
+	return c.RunContext(context.Background(), cmd, stdin)
+}
+
+// RunContext is Run with a limit. When ctx ends before the command does, it
+// closes the connection and returns an error that wraps ctx.Err(). It closes
+// the connection and not the session, because on a stalled path a write
+// blocks in the kernel send buffer, and a channel close needs that same path.
+func (c *Client) RunContext(ctx context.Context, cmd string, stdin []byte) ([]byte, error) {
+	stop := context.AfterFunc(ctx, func() { _ = c.Close() })
+	defer stop()
+
 	session, err := c.conn.NewSession()
 	if err != nil {
+		if ctx.Err() != nil {
+			return nil, fmt.Errorf("run %q: %w", cmd, ctx.Err())
+		}
 		return nil, fmt.Errorf("new ssh session: %w", err)
 	}
 	defer func() { _ = session.Close() }()
@@ -147,7 +161,11 @@ func (c *Client) Run(cmd string, stdin []byte) ([]byte, error) {
 		session.Stdin = bytes.NewReader(stdin)
 	}
 
-	if err := session.Run(cmd); err != nil {
+	err = session.Run(cmd)
+	if !stop() {
+		return []byte(stdout.String()), fmt.Errorf("run %q: %w", cmd, ctx.Err())
+	}
+	if err != nil {
 		return []byte(stdout.String()), fmt.Errorf("run %q: %w (stderr: %s)", cmd, err, strings.TrimSpace(stderr.String()))
 	}
 	return []byte(stdout.String()), nil
