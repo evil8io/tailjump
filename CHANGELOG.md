@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.8.1](https://github.com/evil8io/tailjump/compare/v1.8.0...v1.8.1) (2026-10-04)
+
+
+### Bug Fixes
+
+* **deps:** update all non-major dependencies ([#41](https://github.com/evil8io/tailjump/issues/41)) ([d12b432](https://github.com/evil8io/tailjump/commit/d12b432ce4a951142fefd48f1b369083f25eb4e9))
+* **deps:** update gvisor to the head of the go branch ([#46](https://github.com/evil8io/tailjump/issues/46)) ([07e2418](https://github.com/evil8io/tailjump/commit/07e2418d06033664e57422673f41166f7672bd3e))
+* **deps:** update the quic-go fork to the 0.63.0 branch ([#44](https://github.com/evil8io/tailjump/issues/44)) ([ca70b2e](https://github.com/evil8io/tailjump/commit/ca70b2efe5b5bfae6fdd65edf21e0fa55a465ed3))
+
 ## [1.8.0](https://github.com/evil8io/tailjump/compare/v1.7.0...v1.8.0) (2026-09-17)
 
 
