@@ -1,0 +1,19 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended", "helpers:pinGitHubActionDigestsToSemver", "group:allNonMajor"],
+  "labels": ["renovate"],
+  "packageRules": [
+    {
+      "description": "The quic-go fork is pinned to a commit of a -mod-rename branch. Its tags declare the upstream module path, so go get fails on a tag. Update by hand with go get github.com/apernet/quic-go@<version>-mod-rename.",
+      "enabled": false,
+      "matchDepNames": ["github.com/apernet/quic-go"]
+    },
+    {
+      "description": "gvisor is pinned to a commit of its go branch. A digest update follows the master branch, and master does not build as a Go module.",
+      "enabled": false,
+      "matchDepNames": ["gvisor.dev/gvisor"]
+    }
+  ],
+  "postUpdateOptions": ["gomodTidy"],
+  "rebaseWhen": "behind-base-branch"
+}
