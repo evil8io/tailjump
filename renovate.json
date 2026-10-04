@@ -4,7 +4,7 @@
   "labels": ["renovate"],
   "packageRules": [
     {
-      "description": "The quic-go fork is pinned to a commit of a -mod-rename branch. Its tags declare the upstream module path, so go get fails on a tag. Update by hand with go get github.com/apernet/quic-go@<version>-mod-rename.",
+      "description": "The quic-go fork is pinned to a commit of a -mod-rename branch. Its tags declare the upstream module path, so go get fails on a tag. Update by hand with go get github.com/apernet/quic-go@<head commit of the newest -mod-rename branch>, because Go reads the branch name as a version.",
       "enabled": false,
       "matchDepNames": ["github.com/apernet/quic-go"]
     },
