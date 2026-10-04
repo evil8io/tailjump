@@ -6,8 +6,10 @@
 # VPC over IPv4 and IPv6, proves traceroute in the UDP and the ICMP mode,
 # checks the one-session lock, disconnects, and confirms the remote is clean.
 # It then proves the DNS modes: --dns all against the discovered resolver,
-# and --dns split against a temporary manifest it places on the gateway and
-# removes again. It then proves the protocol set: a session without icmp
+# and --dns split against a temporary manifest it places on the gateway. It
+# saves the manifest the gateway had before the first write and puts it back
+# after the check, because a deployed gateway gets its manifest from
+# userdata. It then proves the protocol set: a session without icmp
 # gets no echo reply, and a session with tcp only refuses --dns all. It then
 # blocks the QUIC port range inside the rig and proves the fallback to the
 # SSH transport, and that --transport quic fails without a session. With
@@ -56,6 +58,10 @@ SSH_OPTS=(-o StrictHostKeyChecking=accept-new -o ConnectTimeout=15 -o BatchMode=
 pass=0
 fail=0
 gateway_manifest_written=0
+gateway_manifest_saved=0
+gateway_manifest_existed=0
+gateway_etc_tj_existed=0
+gateway_manifest_copy="$(mktemp)"
 
 log() { printf '\n=== %s ===\n' "$*"; }
 ok() { printf 'PASS: %s\n' "$*"; pass=$((pass + 1)); }
@@ -125,7 +131,23 @@ tj0_present() {
 	rig resolvectl status 2>/dev/null | grep -q '(tj0)'
 }
 
+# save_gateway_manifest copies the manifest the gateway has before the first
+# write, and records whether the file and /etc/tj exist, so a restore leaves
+# the gateway as the run found it.
+save_gateway_manifest() {
+	if [ "$gateway_manifest_saved" -eq 1 ]; then
+		return
+	fi
+	gateway_etc_tj_existed="$(gateway_ssh 'test -d /etc/tj && echo 1 || echo 0')"
+	gateway_manifest_existed="$(gateway_ssh 'test -f /etc/tj/manifest.yaml && echo 1 || echo 0')"
+	if [ "$gateway_manifest_existed" -eq 1 ]; then
+		gateway_ssh 'cat /etc/tj/manifest.yaml' >"$gateway_manifest_copy"
+	fi
+	gateway_manifest_saved=1
+}
+
 write_gateway_manifest() {
+	save_gateway_manifest
 	gateway_ssh "mkdir -p /etc/tj && cat > /etc/tj/manifest.yaml" <<-MANIFEST
 	version: 1
 	name: test
@@ -136,16 +158,37 @@ write_gateway_manifest() {
 	gateway_manifest_written=1
 }
 
-remove_gateway_manifest() {
-	gateway_ssh 'rm -rf /etc/tj' >/dev/null 2>&1 || true
+# restore_gateway_manifest writes the saved manifest back over the temporary
+# one, or removes what the write created when the gateway had none. A write
+# over an existing file keeps its mode, so the restore sets none.
+restore_gateway_manifest() {
+	if [ "$gateway_manifest_existed" -eq 1 ]; then
+		gateway_ssh 'cat > /etc/tj/manifest.yaml' <"$gateway_manifest_copy" \
+			|| printf 'the restore of the gateway manifest failed\n' >&2
+	elif [ "$gateway_etc_tj_existed" -eq 1 ]; then
+		gateway_ssh 'rm -f /etc/tj/manifest.yaml' >/dev/null 2>&1 || true
+	else
+		gateway_ssh 'rm -rf /etc/tj' >/dev/null 2>&1 || true
+	fi
 	gateway_manifest_written=0
+}
+
+# gateway_manifest_unchanged succeeds when the gateway has the manifest it had
+# before the run, byte for byte, or still has none.
+gateway_manifest_unchanged() {
+	if [ "$gateway_manifest_existed" -eq 1 ]; then
+		gateway_ssh 'cat /etc/tj/manifest.yaml' | cmp -s - "$gateway_manifest_copy"
+	else
+		! gateway_ssh 'test -e /etc/tj/manifest.yaml'
+	fi
 }
 
 cleanup() {
 	log "cleanup"
 	if [ "$gateway_manifest_written" -eq 1 ]; then
-		remove_gateway_manifest
+		restore_gateway_manifest
 	fi
+	rm -f "$gateway_manifest_copy"
 	podman rm -f "$CONTAINER" >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
@@ -399,7 +442,7 @@ else
 	bad "udp listeners remain on the remote: ${LISTENERS}"
 fi
 
-log "tj connect ${TJ_TEST_REF} --dns all (no manifest, servers default to the discovered resolver)"
+log "tj connect ${TJ_TEST_REF} --dns all (servers from the manifest, or the discovered resolver when it names none)"
 rig tj -v connect "$TJ_TEST_REF" --user "$TJ_TEST_USER" --dns all
 
 log "resolvectl status tj0: all mode routes every query with the default route on"
@@ -474,8 +517,8 @@ else
 	ok "tj0 is gone from resolvectl status after disconnect"
 fi
 
-log "remove the temporary manifest"
-remove_gateway_manifest
+log "put the manifest of the gateway back"
+restore_gateway_manifest
 
 log "protocols: tj connect --protocols tcp,udp gets no echo reply, and TCP and DNS still work"
 rig tj -v connect "$TJ_TEST_REF" --user "$TJ_TEST_USER" --dns none --protocols tcp,udp
@@ -688,7 +731,7 @@ fi
 
 rig tj disconnect
 sleep 2
-remove_gateway_manifest
+restore_gateway_manifest
 HELPERS="$(remote_helper_count "$TJ_TEST_REMOTE")"
 if [ "$HELPERS" -eq 0 ]; then
 	ok "no helper process remains on the remote after the fallback session"
@@ -770,13 +813,13 @@ else
 	bad "doctor does not show an echo socket for the gateway"
 fi
 
-log "confirm the gateway is clean"
+log "confirm the gateway is clean and has the manifest it had before the run"
 GW_LEFT="$(gateway_ssh \
-	'ls -A /etc/tj 2>/dev/null; ls -A "$HOME/.cache/tj" 2>/dev/null; ls -A /run/user/0/tj-helper.* 2>/dev/null' || true)"
-if [ -z "$GW_LEFT" ]; then
-	ok "the gateway has no manifest and no tj file"
+	'ls -A "$HOME/.cache/tj" 2>/dev/null; ls -A /run/user/0/tj-helper.* 2>/dev/null' || true)"
+if [ -z "$GW_LEFT" ] && gateway_manifest_unchanged; then
+	ok "the gateway has no tj file, and its manifest is the one it had before the run"
 else
-	bad "the gateway is not clean: ${GW_LEFT}"
+	bad "the gateway is not clean: files '${GW_LEFT}', or its manifest differs from the one before the run"
 fi
 
 log "result: ${pass} passed, ${fail} failed"
