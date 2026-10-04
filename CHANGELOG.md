@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.8.2](https://github.com/evil8io/tailjump/compare/v1.8.1...v1.8.2) (2026-10-04)
+
+
+### Bug Fixes
+
+* **session:** give the helper upload a deadline ([#47](https://github.com/evil8io/tailjump/issues/47)) ([172b304](https://github.com/evil8io/tailjump/commit/172b304dc74a0ec23065eec275c0b6387a06cfef))
+
 ## [1.8.1](https://github.com/evil8io/tailjump/compare/v1.8.0...v1.8.1) (2026-10-04)
 
 
