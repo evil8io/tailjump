@@ -189,7 +189,7 @@ func relayTCP(conn *gonet.TCPConn, stream io.ReadWriteCloser) {
 // handleUDP bridges one captured UDP flow to a mux UDP stream. CreateEndpoint
 // runs inline, then the relay runs in a goroutine. The endpoint reports the
 // TTL of each datagram, so a traceroute probe keeps its TTL on the remote.
-func (ns *netStack) handleUDP(r *udp.ForwarderRequest) {
+func (ns *netStack) handleUDP(r *udp.ForwarderRequest) bool {
 	id := r.ID()
 	src := netip.AddrPortFrom(addrFrom(id.RemoteAddress), id.RemotePort)
 	dst := netip.AddrPortFrom(addrFrom(id.LocalAddress), id.LocalPort)
@@ -197,12 +197,13 @@ func (ns *netStack) handleUDP(r *udp.ForwarderRequest) {
 	ep, terr := r.CreateEndpoint(&wq)
 	if terr != nil {
 		slog.Debug("udp create endpoint failed", "dst", dst, "error", terr.String())
-		return
+		return true
 	}
 	ep.SocketOptions().SetReceiveTTL(true)
 	ep.SocketOptions().SetReceiveHopLimit(true)
 	conn := gonet.NewUDPConn(&wq, ep)
 	go ns.relayUDP(conn, ep, &wq, src, dst)
+	return true
 }
 
 func (ns *netStack) relayUDP(conn *gonet.UDPConn, ep tcpip.Endpoint, wq *waiter.Queue, src, dst netip.AddrPort) {
