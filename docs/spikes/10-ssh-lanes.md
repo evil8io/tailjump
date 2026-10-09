@@ -2,7 +2,7 @@
 
 ## Goal
 
-Measure what the lanes of K8S-217 change on the SSH transport: the latency
+Measure what the lanes, one SSH connection per protocol, change on the SSH transport: the latency
 of a DNS query, a TCP DNS query, and an ICMP echo during a bulk download,
 the bulk rate, and the connect time, on the direct path and on the relayed
 path, in paired cycles with and without the lanes. Spike 9 measured the

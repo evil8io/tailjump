@@ -3,7 +3,7 @@
 ## Goal
 
 Decide whether a UDP flow of a session should run on a QUIC datagram, RFC 9221,
-instead of the QUIC stream it uses today. Chunk 4 of K8S-206 is optional, and
+instead of the QUIC stream it uses today. Chunk 4 of the v2 transport spec is optional, and
 its rule is a measurement: build the datagram path when the datagram p50 is at
 least 10% below the stream p50 on a clean path and on a 30 ms path, and when the
 count of replies above 2 s under loss is not above the stream mode's count.
@@ -102,7 +102,7 @@ The 27 requests of 200 that lost at least one packet match the 13.5% that 7%
 loss in each direction predicts, which is the check that the shaping did what it
 says.
 
-The last row is the acceptance criterion of K8S-206 section 10, which asks that
+The last row is the acceptance criterion in section 10 of the v2 transport spec, which asks that
 at least 95% of the DNS queries are answered within 2 s under this loss. The
 stream mode answers 100% and the datagram mode answers 86.5%, so the datagram
 path would fail that criterion. The two modes ran over the loopback and not
@@ -156,7 +156,7 @@ about one probe timeout.
    `EnableDatagrams` stays false on both sides, so the transport parameter is
    absent and each peer sees no datagram support from the other.
 
-### What K8S-206 assumed
+### What the v2 transport spec assumed
 
 * The UDP flow row of section 5 and the Hysteria2 item of section 11 treat the
   datagram path as a latency gain for DNS. The story gives no measurement for

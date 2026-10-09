@@ -5,8 +5,9 @@
 Measure tj and sshuttle from one client on the same day, in paired cycles, on
 a remote with a direct Tailscale path and on a remote that Tailscale relays
 through DERP: bandwidth, latency under load and idle, and reliability. The
-story is K8S-215. The document states what the numbers change for the
-migration of K8S-203 and what they do not.
+story is the comparison of tj and sshuttle. The document states what the
+numbers change for the migration to the gateway module of the infrastructure
+repository, and what they do not.
 
 ## Method
 
@@ -22,7 +23,7 @@ Versions and flags:
 * tj 1.4.0, `tj connect <remote> --dns all --transport quic` for the QUIC rows
   and `--transport ssh` for the SSH-transport rows. The root copy under
   `/usr/local/libexec/tj` must match the client binary, or `connect` refuses.
-* sshuttle 1.3.2 with the flags of the Evil8 `connect` task,
+* sshuttle 1.3.2 with the flags of the old `connect` task of the infrastructure repository,
   `-v --daemon --pidfile <file> --remote root@<tailnet address>
   --ssh-cmd 'ssh -oStrictHostKeyChecking=accept-new -oServerAliveInterval=60'
   10.0.0.0/8`, plus `--dns`, plus the remote's IPv6 VPC prefix on the
@@ -168,13 +169,13 @@ the factor of 1.6 that spike 5 recorded.
 
 ## Decisions
 
-1. **QUIC stays the default transport, and the K8S-212 cutover from sshuttle
+1. **QUIC stays the default transport, and the cutover from sshuttle
    to tj proceeds without an interim sshuttle tuning.** tj QUIC beats sshuttle
    with the task's flags on every number on both paths: 2.8 times the rate on
    the relayed path, 50 times on the direct path, at the same idle latency and
    with less queueing under load. sshuttle with the 4 MiB buffer reaches 14%
    of the QUIC rate on the direct path at 5 times the DNS latency under load.
-2. **Nothing changes in the K8S-203 module.** The relayed remote reaches the
+2. **Nothing changes in the gateway module of the infrastructure repository.** The relayed remote reaches the
    relay ceiling with tj, the direct remote reaches the client's link, and no
    remote setting is in the way. A private-subnet remote behind a NAT instance
    gets a direct path; behind a managed NAT gateway it gets the relay. Both
