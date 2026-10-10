@@ -44,7 +44,7 @@ stream. One stall over the 30 s yamux keepalive limit ends the session with
 "mux closed", which happened 2.5 min after the session came up.
 
 The client's tailscaled log holds the same switch for the morning session of
-K8S-206 section 2, to the old gateway's VPC address, during the measurement
+section 2 of the v2 transport spec, to the old gateway's VPC address, during the measurement
 that produced the "congestion window 1" numbers. The loop explains that
 collapse without any relay loss. The log also holds the switch for a session
 to a remote with a direct IPv6 path: the remote's global VPC IPv6 address is

@@ -3,7 +3,7 @@
 ## Goal
 
 Confirm that a QUIC connection to a remote's tailnet address carries the tj data
-plane, and settle the four decisions that chunk 1 of K8S-206 owes chunk 2: the
+plane, and settle the four decisions that chunk 1 of the v2 transport spec owes chunk 2: the
 packet size, the helper size, the library, and the congestion controller.
 
 The spike code is on the branch `spike/k8s-208-quic`. It is not merged, and
@@ -87,15 +87,15 @@ the path varies by a factor of 1.6 between runs. The spike 1 column is the
 | Raw TCP over the tailnet, host | 61.3 | 76.6 (tailnet direct) |
 | Raw TCP over the tailnet, rig | 78.7 | not measured |
 | QUIC 1232, library windows, rig | 102.4 | not measured |
-| QUIC 1232, K8S-206 windows, rig | 100.2 | not measured |
-| QUIC 1232, K8S-206 windows, host | 151.2 | not measured |
+| QUIC 1232, v2 spec windows, rig | 100.2 | not measured |
+| QUIC 1232, v2 spec windows, host | 151.2 | not measured |
 | tj IPv4 over the SSH channel | not measured | 51.8 |
 
 QUIC is 1.9 times the same-day raw SSH channel from the rig and 2.8 times it
 from the host. Across all 12 container runs of 256 MiB the range is 74.1 to
 122.5 Mbit/s, so the medians carry that spread.
 
-The K8S-206 receive windows have no measurable effect: 100.2 against 102.4
+The receive windows of the v2 transport spec have no measurable effect: 100.2 against 102.4
 Mbit/s in the paired cycles, inside the run-to-run spread.
 
 ## Result 4: throughput on the relayed path
@@ -107,7 +107,7 @@ direct connection.
 | Configuration | Mbit/s |
 | -- | -- |
 | QUIC 1232, library windows | 22.6 |
-| QUIC 1232, K8S-206 windows | 22.6 |
+| QUIC 1232, v2 spec windows | 22.6 |
 | QUIC 1232, fork with Cubic | 22.6 |
 | QUIC 1232, fork with BBR | 22.6 |
 | Raw TCP over the tailnet | 22.7 |
@@ -116,12 +116,12 @@ direct connection.
 Every configuration lands between 22.0 and 22.8 Mbit/s, and the individual runs
 vary by less than 3%. The relay behaved as a fixed-rate path with no measurable
 loss on this day, so this measurement does not reproduce the collapse that
-K8S-206 section 2 recorded. The controlled loss test in Result 5 is the
+section 2 of the v2 transport spec recorded. The controlled loss test in Result 5 is the
 substitute, and chunk 3 needs it for the acceptance numbers.
 
 A UDP socket bound to the remote's tailnet address received every probe that
 arrived over DERP, and the reply reached the client. That answers the open
-question in K8S-206 section 9 row 1.
+question in section 9 row 1 of the v2 transport spec.
 
 ## Result 5: BBR against Cubic against Brutal under loss
 
@@ -210,7 +210,7 @@ A grant entry in the `ip` field is `<proto>:<port>`, and the port may be a range
 written with a hyphen, for example `"ip": ["tcp:443", "udp:7443-7452"]`. Source:
 the Tailscale grants syntax reference at
 https://tailscale.com/docs/reference/syntax/grants, and the ACL page at
-https://tailscale.com/kb/1018/acls. The C4 example in K8S-206 is correct as
+https://tailscale.com/kb/1018/acls. The C4 example in the v2 transport spec is correct as
 written.
 
 Measured on 2026-09-12: a UDP datagram from this client reached a port in the
@@ -249,7 +249,7 @@ observation of the effect and not a reading of the rule.
    loss, so the Hysteria2 rule stands: a set `transport.bandwidth` means Brutal,
    an unset one means BBR.
 
-### What K8S-206 section 5 got wrong
+### What section 5 of the v2 transport spec got wrong
 
 * The packet size row treats 1232 as the way to avoid a black hole. It is
   stronger than that. The library default cannot connect at all, so chunk 2 must

@@ -1,10 +1,10 @@
 # tailjump (tj) v1 handoff spec
 
-This document is a copy of Linear story K8S-194. The story is the spec and the parent. Each chunk in section 9 is its own story with one PR.
+This document is the v1 spec. Each chunk in section 9 was one PR.
 
 ## 1. Goal
 
-`tj` is a CLI that gives an engineer a session into a remote network over Tailscale SSH, the way sshuttle does. The remote runs no installed software and advertises no subnet routes. The engineer starts and ends every session. The tool works in any tailnet and has no Evil8 term in it. It replaces sshuttle plus the `ts-gateway.sh` script and the `connect` tasks in iac-modules.
+`tj` is a CLI that gives an engineer a session into a remote network over Tailscale SSH, the way sshuttle does. The remote runs no installed software and advertises no subnet routes. The engineer starts and ends every session. The tool works in any tailnet and contains no term of one specific organisation. It replaces sshuttle and the gateway script and the `connect` tasks around it.
 
 Repository: https://github.com/evil8io/tailjump. Binary name: `tj`. Language: Go.
 
@@ -177,7 +177,7 @@ Scaffolding in v1:
 
 ## 9. Chunks
 
-Each chunk is one story and one PR. The order is the dependency order.
+Each chunk was one PR. The order is the dependency order.
 
 | # | Chunk | Content | Done when |
 | -- | -- | -- | -- |
@@ -189,9 +189,9 @@ Each chunk is one story and one PR. The order is the dependency order.
 | 5 | DNS modes on Linux | `none`, `split`, `all`; resolved; the `resolv.conf` fallback | A private name resolves in `split`, and only the listed domain goes to the remote |
 | 6 | Hardening and docs | Liveness, cleanup on crash, logs, `setup`, the README with the contracts, the manifest schema document | An interrupted session leaves no route, device, DNS change, or remote file |
 | 7 | macOS platform | The macOS implementations of section 8 | The chunk 4 and 5 criteria pass on a modern macOS |
-| 8 | Deployment integration in the infrastructure repo | The tailscale-gateway module writes the manifest through user data; the `connect` tasks and `ts-gateway.sh` leave the tree; the mise pin | A session to a customer gateway works with `tj` alone |
+| 8 | Deployment integration in the infrastructure repo | The gateway module of the infrastructure repo writes the manifest through user data; the old `connect` tasks and the gateway script leave the tree; the mise pin | A session to a customer gateway works with `tj` alone |
 
-Chunk 8 is a separate story in the iac-modules flow.
+Chunk 8 is a change in the infrastructure repository, not in this repository.
 
 ## 10. Acceptance criteria for v1
 

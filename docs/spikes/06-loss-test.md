@@ -3,7 +3,7 @@
 ## Goal
 
 Measure a tj session on the QUIC transport and on the SSH transport under
-packet loss and delay, check the acceptance numbers of K8S-206 section 10,
+packet loss and delay, check the acceptance numbers of section 10 of the v2 transport spec,
 compare the congestion controllers, and settle the receive windows, the UDP
 socket buffers, the yamux window, and the packet size with measurements.
 
@@ -57,7 +57,7 @@ The QUIC transport keeps every connect inside one round trip plus the netem
 delay, because a lost packet stalls one stream. On the SSH transport a lost
 segment stalls every flow: the slowest connect took 3.4 s and the p95 is 1.2 s.
 The 20 DNS queries ran one at a time with nothing else on the session, and both
-transports answered all of them; the 1-in-6 baseline of K8S-206 section 2 was
+transports answered all of them; the 1-in-6 baseline in section 2 of the v2 transport spec was
 measured on a session whose one TCP connection had already collapsed under a
 bulk transfer, and the rig does not reproduce that state with idle queries.
 
@@ -155,7 +155,7 @@ against 512 KiB.
 | clean | 55.5 Mbit/s | 46.2 Mbit/s | -17% |
 
 The 4 MiB window stays. Every 512 KiB run under loss hit the 60 s time box, and the clean-path loss of 17% matches spike 1, where the 256 KiB default cost 36%. The head-of-line blocking of the one channel is not a window problem. The cap of 8 flows per SSH connection in the chunk 3 row of
-K8S-206 is not implemented: it needs a pool of SSH connections, which section
+the v2 transport spec is not implemented: it needs a pool of SSH connections, which section
 3 of the story lists as a non-goal, because the SSH transport is the fallback
 only.
 
@@ -179,9 +179,9 @@ campaign, 64 MiB over IPv4, median of 3, no shaping, both transports.
 | UDP DNS answered within 2 s | 20 of 20 | 20 of 20 |
 | Bulk 64 MiB over IPv4, median of 3 | 22.2 (22.3, 22.1, 22.2) Mbit/s | 22.3 (21.7, 22.4, 22.3) Mbit/s |
 
-The relay carried both transports at the same rate with no measurable loss, as spike 5 found on the same day. The collapse of K8S-206 section 2 needs loss on the relay, which the relay did not show on 2026-09-12, so the netem runs above are the acceptance measurement and this run is the sanity check: the QUIC transport comes up over DERP, every connect and query succeeds, and the throughput equals the path.
+The relay carried both transports at the same rate with no measurable loss, as spike 5 found on the same day. The collapse in section 2 of the v2 transport spec needs loss on the relay, which the relay did not show on 2026-09-12, so the netem runs above are the acceptance measurement and this run is the sanity check: the QUIC transport comes up over DERP, every connect and query succeeds, and the throughput equals the path.
 
-## Acceptance, K8S-206 section 10
+## Acceptance, section 10 of the v2 transport spec
 
 The criteria apply to the default transport, which is QUIC with BBR, in the
 shipped configuration. The SSH transport is the fallback and is the comparison.
@@ -219,6 +219,6 @@ The final run of `run.sh` on this branch is in the pull request.
 5. **Packet size: 1232 on both sides stays.** The measured gain of a larger
    size is 1.6% over IPv4 and zero over IPv6, and the rig cannot check it.
 6. **Flow cap on the SSH transport: not implemented.** It needs the SSH
-   connection pool that K8S-206 section 3 excludes.
+   connection pool that section 3 of the v2 transport spec excludes.
 7. **The `TJ_QUIC_CONTROLLER=cubic` knob ships as a measurement knob only.**
    It has no place in the config, the manifest, or the README.
