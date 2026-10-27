@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.8.3](https://github.com/evil8io/tailjump/compare/v1.8.2...v1.8.3) (2026-10-27)
+
+
+### Bug Fixes
+
+* **deps:** update all non-major dependencies ([#51](https://github.com/evil8io/tailjump/issues/51)) ([034a957](https://github.com/evil8io/tailjump/commit/034a957ac9685179dcc13ef62aa332c5967719c8))
+* **deps:** update golang.zx2c4.com/wireguard digest to 2631ce9 ([#50](https://github.com/evil8io/tailjump/issues/50)) ([4e03512](https://github.com/evil8io/tailjump/commit/4e03512100e4939c6846f19d15c9c5c1e3020ff2))
+* **deps:** update golang.zx2c4.com/wireguard digest to b3bc704 ([#56](https://github.com/evil8io/tailjump/issues/56)) ([0502f0b](https://github.com/evil8io/tailjump/commit/0502f0b79f622c459bc1ce1490dc9c837c66266a))
+
 ## [1.8.2](https://github.com/evil8io/tailjump/compare/v1.8.1...v1.8.2) (2026-10-04)
 
 
