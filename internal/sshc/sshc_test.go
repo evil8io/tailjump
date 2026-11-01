@@ -219,8 +219,11 @@ func TestRunContextDeadlineClosesTheConnection(t *testing.T) {
 		t.Fatalf("RunContext returned after %s, want it within the limit", d)
 	}
 
-	closed := make(chan error, 1)
-	go func() { closed <- c.conn.Wait() }()
+	closed := make(chan struct{})
+	go func() {
+		_ = c.conn.Wait()
+		close(closed)
+	}()
 	select {
 	case <-closed:
 	case <-time.After(5 * time.Second):
