@@ -4,7 +4,7 @@ This document is the v1 spec. Each chunk in section 9 was one PR.
 
 ## 1. Goal
 
-`tj` is a CLI that gives an engineer a session into a remote network over Tailscale SSH, the way sshuttle does. The remote runs no installed software and advertises no subnet routes. The engineer starts and ends every session. The tool works in any tailnet and contains no term of one specific organisation. It replaces sshuttle and the gateway script and the `connect` tasks around it.
+`tj` is a CLI that gives an engineer a session into a remote network over Tailscale SSH, the way sshuttle does. The remote does not run installed software. It does not advertise subnet routes. The engineer starts and ends every session. The tool works in any tailnet. It does not contain a term of one specific organisation. It replaces sshuttle and the gateway script and the `connect` tasks around it.
 
 Repository: https://github.com/evil8io/tailjump. Binary name: `tj`. Language: Go.
 
@@ -19,7 +19,7 @@ Repository: https://github.com/evil8io/tailjump. Binary name: `tj`. Language: Go
 
 ## 3. Terms
 
-* **remote**: the tailnet node that a session uses. sshuttle calls it `--remote`.
+* **remote**: the tailnet node that a session uses. In sshuttle, it is `--remote`.
 * **manifest**: the config file that a remote advertises.
 * **session**: one active connection from the client to one remote.
 * **helper**: the tj binary that the client uploads to the remote for the session.
@@ -30,13 +30,13 @@ Repository: https://github.com/evil8io/tailjump. Binary name: `tj`. Language: Go
 | Decision | Choice | Reason |
 | -- | -- | -- |
 | Language | Go | One static binary, cross-compile for Linux and macOS, mise install through the `github` backend, Tailscale client libraries |
-| Where the config lives | The remote advertises a manifest; no central repository | A remote then needs no central change, and the tool works in any tailnet |
+| Where the config is | The remote advertises a manifest; no central repository | A remote then does not need a central change. The tool works in any tailnet |
 | Manifest shape | The manifest is the profile; no named profiles | One line per remote in `list`, no selector on `connect`, one concept less. Variants come from the SSH user, because the manifest lookup starts in the SSH user's config directory, and the tailnet policy enforces who may use that user |
 | Discovery | Its own section with one boolean per source; the session set is the union of discovery and `networks`, minus excludes | No keyword in a list |
 | Sessions | One active session per machine; `connect` refuses when one is active | Every customer uses ranges inside 10.0.0.0/8 |
 | Data plane | Native from v1, with TCP, UDP, IPv4, IPv6, and DNS over UDP | sshuttle is not a dependency |
 | Capture | A TUN device with a userspace network stack (`golang.zx2c4.com/wireguard/tun` and `gvisor.dev/gvisor/pkg/tcpip`), not TPROXY and not pf | One data plane for Linux and macOS, no firewall rules, the capture is a route |
-| Remote side | A helper uploaded per session; not SSH `direct-tcpip` | SSH forwards no UDP |
+| Remote side | A helper uploaded per session; not SSH `direct-tcpip` | SSH does not forward UDP |
 | Privilege | `tj connect` re-executes as root through sudo and runs the session as a transient system unit | Least code for v1; the root-helper split is the upgrade path |
 | Client OS | Linux in v1, macOS later, modern OSes only | Scope |
 
@@ -46,14 +46,14 @@ Repository: https://github.com/evil8io/tailjump. Binary name: `tj`. Language: Go
 
 A tailnet node is a remote when:
 
-1. Tailscale SSH is on, and the tailnet policy lets the engineer open SSH as some user.
+1. Tailscale SSH is on. The tailnet policy contains a rule that lets the engineer open SSH as some user.
 2. The host is Linux on amd64 or arm64.
 3. The SSH user has a directory where it can write and execute a file. The lookup order is `$XDG_RUNTIME_DIR`, then `$HOME/.cache/tj`.
-4. The node reaches the networks. It needs no IP forwarding, no NAT, no subnet routes, and no root.
+4. The node reaches the networks. It does not need IP forwarding, NAT, subnet routes, or root.
 
 A manifest is optional. The client looks in `$XDG_CONFIG_HOME/tj/manifest.yaml` of the SSH user first, then in `/etc/tj/manifest.yaml`. A missing manifest equals an empty manifest.
 
-The client leaves nothing on the remote after a session.
+The client does not leave anything on the remote after a session.
 
 ### C2. The manifest, schema version 1
 
@@ -77,47 +77,52 @@ checks:
     tcp: 10.1.0.2:53
 ```
 
-* `discovery`: an absent section means all sources on.
+* `discovery`: an absent section means that all sources are on.
 * `networks`: static CIDRs, IPv4 and IPv6.
 * `exclude`: CIDRs that a session never routes.
-* `dns.servers`: absent means the discovered resolvers.
-* `dns.domains`: absent means the `split` mode is not available, and the client says so.
+* `dns.servers`: when the key is absent, the session uses the discovered resolvers.
+* `dns.domains`: when the key is absent, the `split` mode is not available. The client reports this.
 * `checks`: TCP endpoints that `tj doctor` tests from the remote and from the client.
 
-The client always excludes the tailnet range 100.64.0.0/10 and the remote's own address, so the manifest does not list them.
+The client always excludes the tailnet range 100.64.0.0/10 and the remote's own address, so they do not need to be in the manifest.
 
 ### C3. Discovery
 
-The client pipes a POSIX `sh` script over the SSH session channel, and the script prints one JSON document. Sources:
+The client pipes a POSIX `sh` script over the SSH session channel. The script prints one JSON document. Sources:
 
 * `link_routes`: the connected subnets from `ip route`, IPv4 and IPv6.
 * `resolvers` and `search_domains`: the per-link upstreams from `resolvectl`, or `/etc/resolv.conf`. The script skips the MagicDNS address 100.100.100.100.
-* `cloud`: the network CIDRs from the metadata service of AWS, Azure, GCP, or OCI, when one answers. AWS is verified: the instance metadata path `network/interfaces/macs/<mac>/vpc-ipv4-cidr-blocks` lists the primary and the secondary CIDRs, and `vpc-ipv6-cidr-blocks` the IPv6 CIDR. Azure and OCI metadata report the subnet only, unverified.
+* `cloud`: the network CIDRs from the metadata service of AWS, Azure, GCP, or OCI, when one answers. AWS is verified. The instance metadata path `network/interfaces/macs/<mac>/vpc-ipv4-cidr-blocks` contains the primary and the secondary CIDRs. The path `vpc-ipv6-cidr-blocks` contains the IPv6 CIDR. The Azure and OCI metadata contain the subnet only. This is unverified.
 
-The script version is the client version. Discovery cannot list routes beyond the VPC, for example TGW routes in a shared VPC. Those go in `networks`.
+The script version is the client version. Discovery cannot list routes beyond the VPC, for example TGW routes in a shared VPC. Add those routes to `networks`.
 
 ### C4. The session
 
-* One session is active at a time. `connect` refuses when a session is active and names it. `--replace` ends the active session first.
+* One session is active at a time. `connect` refuses when a session is active and reports the name of the session. With `--replace`, `connect` ends the active session first.
 * A session ends on `disconnect`, on logout, or on a failed liveness check. It never restarts after a reboot.
-* The session networks: the manifest `networks` plus the discovery result, minus the manifest `exclude`, minus the tailnet range, minus the remote's address, minus the client's connected subnets, minus the local excludes and the `--exclude` flags.
-* The client writes state to the runtime directory and logs to the journal.
+* The session networks are the manifest `networks` plus the discovery result. The client removes these networks from that set:
+  * the manifest `exclude`
+  * the tailnet range
+  * the remote's address
+  * the client's connected subnets
+  * the local excludes and the `--exclude` flags
+* The client writes state to the runtime directory and writes logs to the journal.
 
 ### C5. The tailnet policy
 
-The policy needs one SSH rule per remote and user. Nothing else. A tag is optional and only filters `list`.
+The policy needs one SSH rule per remote and user. It does not need another rule. A tag is optional. `list` uses the tag only as a filter.
 
 ## 6. Architecture
 
 ### Components
 
 1. **CLI**: cobra commands, config, output.
-2. **tailnet**: reads the peers from the tailscaled local API with `tailscale.com/client/local`. Peers expose `HostName`, `Tags`, `Online`, and `TailscaleIPs`, verified with `tailscale status --json`.
-3. **ssh**: `golang.org/x/crypto/ssh` against the remote's tailnet address. Auth is `none` or any public key, because Tailscale SSH authenticates the node. Check mode sends a URL in the SSH banner, so the client prints the banner. Host keys: the client trusts a tailnet address because WireGuard authenticated the peer, and it stores the key per remote for a warning on change.
+2. **tailnet**: reads the peers from the tailscaled local API with `tailscale.com/client/local`. Each peer contains `HostName`, `Tags`, `Online`, and `TailscaleIPs`. This is verified with `tailscale status --json`.
+3. **ssh**: `golang.org/x/crypto/ssh` against the remote's tailnet address. Auth is `none` or any public key, because Tailscale SSH authenticates the node. In check mode, Tailscale SSH sends a URL in the SSH banner, so the client prints the banner. Host keys: the client trusts a tailnet address because WireGuard authenticated the peer. The client stores the key per remote to warn when the key changes.
 4. **manifest and discovery**: read the manifest, run the discovery script, merge, compute the session networks.
 5. **platform**: one interface per concern with a Linux implementation and a macOS stub, see section 8.
 6. **dataplane**: the TUN device, the netstack, and the flow handler. Every TCP connection and UDP flow that the stack terminates becomes a stream or a datagram sequence on the mux.
-7. **mux**: one multiplexed protocol over the SSH session's stdin and stdout, for example `hashicorp/yamux`. One stream per TCP connection. UDP as framed datagrams with a flow id, an original destination, and an idle timeout on both ends.
+7. **mux**: one multiplexed protocol over the SSH session's stdin and stdout, for example `hashicorp/yamux`. Each TCP connection has one stream. UDP is sent as framed datagrams with a flow id, an original destination, and an idle timeout on both ends.
 8. **helper**: the `tj _remote` subcommand. The client embeds the helper for linux/amd64 and linux/arm64, uploads the one for `uname -m`, runs it, and deletes it at the end. The helper is unprivileged. It opens outbound TCP connections and UDP sockets.
 
 ### Session flow
@@ -133,7 +138,7 @@ The policy needs one SSH rule per remote and user. Nothing else. A tag is option
 
 ### DNS modes
 
-* `none`: no DNS change.
+* `none`: the session does not change the DNS.
 * `split`: the manifest domains resolve at the manifest servers. Linux: a routing domain per domain, for example `~corp.example`, and the servers as the DNS of the `tj0` link, through systemd-resolved. The servers are inside the session networks, so the queries are ordinary captured UDP and TCP.
 * `all`: every query resolves at the manifest servers. Linux: `~.` on the `tj0` link through systemd-resolved. Fallback without resolved: rewrite `/etc/resolv.conf` with a backup, and restore on disconnect.
 * The MagicDNS address is never captured, so tailnet names resolve locally in every mode.
@@ -145,14 +150,14 @@ The policy needs one SSH rule per remote and user. Nothing else. A tag is option
 ## 7. The CLI
 
 * `tj setup`: sudoers rule, tool checks.
-* `tj list [--tag <tag>] [--probe]`: online peers; `--probe` opens SSH to each with a short timeout and marks the ones with a manifest; results are cached.
+* `tj list [--tag <tag>] [--probe]`: the online peers. With `--probe`, `tj list` opens SSH to each peer with a short timeout and marks the peers that have a manifest. The results are cached.
 * `tj describe <remote>`: the merged config without a session.
 * `tj doctor <remote>`: runs the manifest checks from the remote and from the client.
 * `tj connect <remote> [--user <ssh-user>] [--dns none|split|all] [--exclude <cidr>]... [--no-discovery] [--replace]`
 * `tj disconnect`
 * `tj status`: the active session, its networks, the DNS mode, the remote, and the uptime.
 
-Local config in `$XDG_CONFIG_HOME/tj/config.yaml`: aliases per remote, default SSH user, default DNS mode, local excludes.
+The local config is in `$XDG_CONFIG_HOME/tj/config.yaml`. It contains the aliases per remote, the default SSH user, the default DNS mode, and the local excludes.
 
 ## 8. Platform layer and macOS scaffolding
 
@@ -169,10 +174,10 @@ Local config in `$XDG_CONFIG_HOME/tj/config.yaml`: aliases per remote, default S
 
 Scaffolding in v1:
 
-* The build matrix has `linux/amd64`, `linux/arm64`, and `darwin/arm64` from the first commit, and CI builds all three.
-* The macOS platform package exists and returns a "not supported yet" error from the device call only. `list`, `describe`, and `doctor` work on macOS in v1.
-* The platform interfaces live in one package with a fake implementation for tests.
-* The data plane has an in-process test that runs the netstack, the mux, and the helper in one process over a pipe, with no device and no root.
+* The build matrix has `linux/amd64`, `linux/arm64`, and `darwin/arm64` from the first commit. CI builds all three.
+* The macOS platform package exists. Only its device call returns a "not supported yet" error. `list`, `describe`, and `doctor` work on macOS in v1.
+* The platform interfaces are in one package with a fake implementation for tests.
+* The data plane has an in-process test that runs the netstack, the mux, and the helper in one process over a pipe. The test does not need a device or root.
 * The remote helper is Linux only in every version. A macOS client embeds the same two Linux helpers.
 
 ## 9. Chunks
@@ -181,34 +186,34 @@ Each chunk was one PR. The order is the dependency order.
 
 | # | Chunk | Content | Done when |
 | -- | -- | -- | -- |
-| 0 | Repository scaffold | Go module, cobra skeleton, platform interfaces with fakes and the macOS stub, CI build matrix, lint, release-please, goreleaser, mise install through the `github` backend | CI is green on all three targets, and `tj version` runs |
+| 0 | Repository scaffold | Go module, cobra skeleton, platform interfaces with fakes and the macOS stub, CI build matrix, lint, release-please, goreleaser, mise install through the `github` backend | CI is green on all three targets. `tj version` runs |
 | 1 | Spikes | Four throwaway branches with a written result each in `docs/spikes/`: TUN plus netstack on Linux with a throughput measurement against sshuttle on the same remote; the Go SSH client against Tailscale SSH including check mode; a remote with a `noexec` runtime directory; the helper size | Each result is a document with the numbers |
 | 2 | Tailnet and SSH | `list`, `describe`, `doctor`; the local API client; the SSH client; the manifest reader; the discovery script; the session network computation | `tj describe` prints the merged config for the shared gateway and for a second gateway |
-| 3 | Helper and mux | `tj _remote`; the mux protocol; TCP streams; UDP frames with idle timeout; upload, start, and cleanup; the in-process loopback test | The loopback test passes for TCP and UDP, and no file remains on the remote |
+| 3 | Helper and mux | `tj _remote`; the mux protocol; TCP streams; UDP frames with idle timeout; upload, start, and cleanup; the in-process loopback test | The loopback test passes for TCP and UDP. No file remains on the remote |
 | 4 | Data plane on Linux | The device, the netstack, the flow handler, the routes; `connect`, `disconnect`, `status`; sudo re-exec; the transient unit; the one-session lock | TCP, UDP, IPv4, and IPv6 reach the VPC CIDRs of the shared gateway |
-| 5 | DNS modes on Linux | `none`, `split`, `all`; resolved; the `resolv.conf` fallback | A private name resolves in `split`, and only the listed domain goes to the remote |
-| 6 | Hardening and docs | Liveness, cleanup on crash, logs, `setup`, the README with the contracts, the manifest schema document | An interrupted session leaves no route, device, DNS change, or remote file |
+| 5 | DNS modes on Linux | `none`, `split`, `all`; resolved; the `resolv.conf` fallback | A private name resolves in `split`. Only the listed domain goes to the remote |
+| 6 | Hardening and docs | Liveness, cleanup on crash, logs, `setup`, the README with the contracts, the manifest schema document | An interrupted session does not leave a route, a device, a DNS change, or a remote file |
 | 7 | macOS platform | The macOS implementations of section 8 | The chunk 4 and 5 criteria pass on a modern macOS |
-| 8 | Deployment integration in the infrastructure repo | The gateway module of the infrastructure repo writes the manifest through user data; the old `connect` tasks and the gateway script leave the tree; the mise pin | A session to a customer gateway works with `tj` alone |
+| 8 | Deployment integration in the infrastructure repo | The manifest is written through user data from the gateway module of the infrastructure repo; the old `connect` tasks and the gateway script are removed from the tree; the mise pin | A session to a customer gateway works with `tj` alone |
 
 Chunk 8 is a change in the infrastructure repository, not in this repository.
 
 ## 10. Acceptance criteria for v1
 
 * On a current Ubuntu client, `tj connect` to the shared gateway gives TCP, UDP, and DNS to the VPC CIDRs, IPv4 and IPv6.
-* `tailscale status --json` shows no primary routes on the remote before, during, and after a session.
+* `tailscale status --json` does not show primary routes on the remote before, during, and after a session.
 * No file remains on the remote after `disconnect`.
-* `tj connect` with an active session refuses and names the session.
+* `tj connect` with an active session refuses and reports the name of the session.
 * A session to a remote without a manifest works on its connected subnets.
-* A CI build for `darwin/arm64` passes, and `tj list` runs on macOS.
+* A CI build for `darwin/arm64` passes. `tj list` runs on macOS.
 
 ## 11. Verified facts, 2026-09-11
 
-* Tailscale SSH on the shared gateway, Tailscale 1.102.3, accepts an OpenSSH port forward with `-N` and no command. A DNS query over TCP through that forward returned the expected address. The design does not use forwards, but the test proves the session channel and exec.
-* The instance metadata on both gateways lists the VPC CIDRs, including the secondary CIDRs, and the IPv6 CIDR. Instance tags in metadata are off. `resolvectl` shows the VPC resolver on the `ens5` link. A gateway can have no IPv6 address.
+* Tailscale SSH on the shared gateway, Tailscale 1.102.3, accepts an OpenSSH port forward with `-N` and without a command. A DNS query over TCP through that forward returned the expected address. The design does not use forwards. The session channel and exec work, per this test.
+* The instance metadata on both gateways contains the VPC CIDRs, including the secondary CIDRs, and the IPv6 CIDR. Instance tags in metadata are off. `resolvectl` shows the VPC resolver on the `ens5` link. A gateway does not always have an IPv6 address.
 * The pod CIDRs of both VPCs are secondary VPC CIDRs inside the tailnet range 100.64.0.0/10, so the tailnet exclusion is not optional.
 * `tailscale status --json` shows `Tags`, `Online`, and `TailscaleIPs` for peers.
-* sshuttle 1.3.2: `--dns` reads the upstreams behind the resolved stub; `--ns-hosts` captures one address; `--to-ns` sets the server target; without it the server picks a random resolver from its own `resolv.conf`; the server does not exclude itself. The client code that tj replaces is about 2,700 lines of Python.
+* sshuttle 1.3.2: with `--dns`, sshuttle reads the upstreams behind the resolved stub. With `--ns-hosts`, sshuttle captures one address. With `--to-ns`, sshuttle sets the server target. Without `--to-ns`, the server picks a random resolver from its own `resolv.conf`. The server does not exclude itself. The client code that tj replaces is about 2,700 lines of Python.
 
 ## 12. References
 

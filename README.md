@@ -6,9 +6,9 @@ SSH enabled. It is inspired by [sshuttle](https://github.com/sshuttle/sshuttle).
 ## Why
 
 Tailscale lets clients [accept routes from subnet routers](https://tailscale.com/kb/1019/subnets).
-However, this means accepting all routes advertised by all routers. This makes
-it impossible to connect to the networks of Tailscale peers whose networks
-have overlapping CIDRs. `tj` acts like a traditional proxy VPN, granting the
+However, a client then accepts all routes that all routers advertise. As a result, the client
+cannot connect to the networks of Tailscale peers whose networks
+have overlapping CIDRs. `tj` acts like a traditional proxy VPN. It grants the
 client access to a single peer's network. See
 [tailscale#18451](https://github.com/tailscale/tailscale/issues/18451),
 [tailscale#19590](https://github.com/tailscale/tailscale/issues/19590),
@@ -18,10 +18,10 @@ client access to a single peer's network. See
 ## How it works
 
 * Tailscale SSH authenticates the remote. The session uploads a helper binary
-  for its duration, and the helper deletes its own file at start.
+  for its duration. The helper deletes its own file at start.
 * A TUN device from wireguard-go and a gVisor netstack capture the TCP, UDP,
-  and ICMP echo flows on the client, so `ping` and `traceroute` work through
-  the session.
+  and ICMP echo flows on the client. As a result, `ping` and `traceroute` work
+  through the session.
 * The flows run as streams of one QUIC connection to the remote's tailnet
   address, with the BBR congestion controller. The SSH channel with yamux is
   the fallback transport.
@@ -31,7 +31,7 @@ client access to a single peer's network. See
 * The session runs as a transient systemd unit and applies the DNS mode
   through systemd-resolved.
 
-Written in Go. The QUIC library is the apernet fork of quic-go, with the BBR
+`tj` is written in Go. The QUIC library is the apernet fork of quic-go, with the BBR
 and Brutal controllers from hysteria.
 
 ## Requirements
@@ -51,7 +51,7 @@ and Brutal controllers from hysteria.
 ```
 
 Or take the archive from the [releases](https://github.com/evil8io/tailjump/releases).
-A `go install` build embeds no helper, so it serves the read-only commands only.
+A `go install` build does not contain a helper, so only the read-only commands work with it.
 
 ## Use
 
@@ -67,9 +67,9 @@ tj disconnect
 
 `<remote>` is a hostname, a tag, or an alias from `tj alias`. `tj --help`
 lists every command in its group. `tj connect --dry-run` prints the plan for
-a remote and starts no session.
+a remote and does not start a session.
 
-`--json` prints machine output on `list`, `describe`, `status`, `doctor`,
+With `--json`, `tj` prints machine output on `list`, `describe`, `status`, `doctor`,
 `bench`, and `connect --dry-run`.
 
 `tj bench <remote>` measures the throughput of the transport to a remote, up
@@ -78,7 +78,7 @@ and then down, without a session. Its rates are the values for
 
 Exit codes:
 
-* `0` is success. A connect to the remote of the active session, without
+* `0` is success. `tj connect` to the remote of the active session, without
   `--replace`, also exits 0.
 * `1` is a runtime error.
 * `2` is a usage error.
@@ -86,7 +86,7 @@ Exit codes:
 * `130` is an interrupt.
 
 A session reconnects after a loss for `reconnect_for`, default 10 minutes.
-`--reconnect-for 0` turns the reconnect off. `tj status` shows the reconnect.
+With `--reconnect-for 0`, the session does not reconnect. `tj status` shows the reconnect.
 
 `tj status` also shows the latency of the path, the round-trip time of the
 transport, and the traffic of the session. These rows follow the first
