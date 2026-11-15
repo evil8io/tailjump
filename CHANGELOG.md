@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.8.4](https://github.com/evil8io/tailjump/compare/v1.8.3...v1.8.4) (2026-11-15)
+
+
+### Bug Fixes
+
+* **deps:** update all non-major dependencies ([#59](https://github.com/evil8io/tailjump/issues/59)) ([09111de](https://github.com/evil8io/tailjump/commit/09111deee66c3c26f10368adb7edc45359bc4b6c))
+
 ## [1.8.3](https://github.com/evil8io/tailjump/compare/v1.8.2...v1.8.3) (2026-11-01)
 
 
