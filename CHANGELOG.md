@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.8.5](https://github.com/evil8io/tailjump/compare/v1.8.4...v1.8.5) (2026-11-25)
+
+
+### Miscellaneous Chores
+
+* **deps:** update all non-major dependencies ([#62](https://github.com/evil8io/tailjump/issues/62)) ([654771f](https://github.com/evil8io/tailjump/commit/654771ff676f78a58c60cf5cb191c3d4aaf35552))
+
 ## [1.8.4](https://github.com/evil8io/tailjump/compare/v1.8.3...v1.8.4) (2026-11-25)
 
 
