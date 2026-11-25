@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.8.4](https://github.com/evil8io/tailjump/compare/v1.8.3...v1.8.4) (2026-11-25)
+
+
+### Bug Fixes
+
+* **deps:** update all non-major dependencies ([#59](https://github.com/evil8io/tailjump/issues/59)) ([09111de](https://github.com/evil8io/tailjump/commit/09111deee66c3c26f10368adb7edc45359bc4b6c))
+
+
+### Miscellaneous Chores
+
+* **deps:** update dependency goreleaser to v2.20.0 ([#58](https://github.com/evil8io/tailjump/issues/58)) ([05ec1c5](https://github.com/evil8io/tailjump/commit/05ec1c5e450c619c0ac01fe21c4e144d16a32848))
+* **deps:** update jdx/mise-action action to v5.2.6 ([#57](https://github.com/evil8io/tailjump/issues/57)) ([64ef1b1](https://github.com/evil8io/tailjump/commit/64ef1b16d682656f41d57c47e72c510692244b4d))
+
 ## [1.8.3](https://github.com/evil8io/tailjump/compare/v1.8.2...v1.8.3) (2026-11-01)
 
 
